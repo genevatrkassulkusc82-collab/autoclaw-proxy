@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>autoclaw-proxy 管理台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='6' y1='4' x2='44' y2='46' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%236366f1'/%3E%3Cstop offset='.55' stop-color='%238b5cf6'/%3E%3Cstop offset='1' stop-color='%23ec4899'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M24 6 L38 13 L38 26 C38 34 32 40 24 42 C16 40 10 34 10 26 L10 13 Z' fill='url(%23g)'/%3E%3Cpath d='M17 24 L22 29 L31 20' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/web/static/style.css">
+</head>
+<body>
+
+<!-- ===== 登录页 ===== -->
+<div class="login-page" id="loginPage" style="display:none">
+  <div class="login-box">
+    <h2>autoclaw-proxy</h2>
+    <div class="subtitle">AutoClaw 多账号 · OpenAI 兼容网关管理台</div>
+    <div class="login-error" id="loginError"></div>
+    <div class="form-group">
+      <label>用户名</label>
+      <input type="text" id="loginUser" placeholder="admin" autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label>密码</label>
+      <input type="password" id="loginPass" placeholder="admin123" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" onclick="doLogin()">登录</button>
+    <div class="hint">默认账户: admin / admin123（登录后请尽快修改）</div>
+  </div>
+  <div class="login-footer">仅管理自有账号 · 请遵守上游服务条款</div>
+</div>
+
+<!-- ===== 主界面 ===== -->
+<div id="mainApp" style="display:none">
+<header class="topnav">
+  <div class="topnav-inner">
+    <div class="brand-mini">
+      <svg width="30" height="30" viewBox="0 0 48 48" fill="none" aria-hidden="true"><defs><linearGradient id="lg1" x1="6" y1="4" x2="44" y2="46" gradientUnits="userSpaceOnUse"><stop stop-color="#6366f1"/><stop offset=".55" stop-color="#8b5cf6"/><stop offset="1" stop-color="#ec4899"/></linearGradient></defs><path d="M24 6 L38 13 L38 26 C38 34 32 40 24 42 C16 40 10 34 10 26 L10 13 Z" fill="url(#lg1)"/><path d="M17 24 L22 29 L31 20" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="brand-txt"><span>autoclaw-proxy</span><span class="brand-sub">AUTOCLAW 多账号 LLM 网关</span></span>
+    </div>
+    <nav class="pill-nav">
+      <a class="nav-link active" data-section="dashboard" onclick="switchSection('dashboard')">📊 仪表盘</a>
+      <a class="nav-link" data-section="accounts" onclick="switchSection('accounts')">🪪 账号管理</a>
+      <a class="nav-link" data-section="test" onclick="switchSection('test')">🧪 在线测试</a>
+      <a class="nav-link" data-section="keys" onclick="switchSection('keys')">🔑 API 密钥</a>
+      <a class="nav-link" data-section="models" onclick="switchSection('models')">🧠 模型</a>
+      <a class="nav-link" data-section="proxy" onclick="switchSection('proxy')">🌐 出口代理</a>
+      <a class="nav-link" data-section="logs" onclick="switchSection('logs')">📜 调用日志</a>
+      <a class="nav-link" data-section="settings" onclick="switchSection('settings')">⚙️ 设置</a>
+    </nav>
+    <div class="top-user">
+      <span class="status-chip"><span class="dot"></span><span class="status-txt">运行中</span></span>
+      <div class="user-avatar" id="userAvatar">A</div>
+      <button class="btn-logout-top" onclick="doLogout()">退出</button>
+    </div>
+  </div>
+</header>
+
+<main class="app-content">
+
+<!-- ===== 仪表盘 ===== -->
+<div class="section active" id="section-dashboard">
+  <div class="alert-banner warn" id="defaultPassWarn" style="display:none">
+    <span>⚠️</span><span><b>仍在使用默认密码</b>，请立即到「设置 → 修改管理密码」更换，防止未授权访问。</span>
+  </div>
+  <div class="alert-banner danger" id="rtExpireWarn" style="display:none">
+    <span>🚨</span><span id="rtExpireText"></span>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card blue"><div class="stat-body"><div class="label">账号总数</div><div class="value" id="st-acc">-</div><div class="sub" id="st-acc-sub">-</div></div></div>
+    <div class="stat-card green"><div class="stat-body"><div class="label">24h 成功</div><div class="value" id="st-ok">-</div><div class="sub">调用次数</div></div></div>
+    <div class="stat-card orange"><div class="stat-body"><div class="label">24h 失败</div><div class="value" id="st-fail">-</div><div class="sub">调用次数</div></div></div>
+    <div class="stat-card purple"><div class="stat-body"><div class="label">24h Tokens</div><div class="value" id="st-tok">-</div><div class="sub">入 + 出</div></div></div>
+    <div class="stat-card blue"><div class="stat-body"><div class="label">历史请求</div><div class="value" id="st-total">-</div><div class="sub">累计</div></div></div>
+    <div class="stat-card green"><div class="stat-body"><div class="label">API 密钥</div><div class="value" id="st-keys">-</div><div class="sub" id="st-keys-sub">-</div></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>接入指引</h2><button class="btn btn-sm btn-secondary" onclick="loadStats()">刷新</button></div>
+    <div class="card-body">
+      <div id="hint-acc-status" class="hint-block"></div>
+      <pre class="out" id="usage-hint" style="margin-top:12px"></pre>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>最近调用</h2>
+      <button class="btn btn-sm btn-secondary" onclick="switchSection('logs')">查看全部 →</button></div>
+    <div class="table-wrap"><table class="mini-table">
+      <thead><tr><th>时间</th><th>账号</th><th>请求模型</th><th>状态</th><th>Tokens(入/出)</th><th>TTFT</th><th>耗时</th></tr></thead>
+      <tbody id="dash-usage-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ===== 账号管理 ===== -->
+<div class="section" id="section-accounts">
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="importLocal()">📥 导入本机登录态（推荐）</button>
+    <button class="btn btn-secondary" onclick="openSmsModal()">📱 验证码登录</button>
+    <button class="btn btn-secondary" onclick="loadAccounts()">刷新</button>
+    <span class="toolbar-title" id="accCount"></span>
+    <span class="hint-block" id="import-preview"></span>
+  </div>
+  <div class="alert-banner warn">
+    <span>💡</span><span><b>多账号可靠流程：</b>在官方 AutoClaw 客户端登录目标账号 → 回到本页点「导入本机登录态」→ 再在官方客户端切换下一个账号重复导入。
+    「验证码登录」为直连上游的补充通道，上游登录端点有客户端 TLS/HTTP2 指纹风控（仅认官方 Electron/真实浏览器），非官方客户端可能持续返回 400001，属上游反自动化策略，非本网关缺陷。</span>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>账号列表</h2></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>用户</th><th>设备</th><th>分组</th><th>状态</th><th>AT 剩余</th><th>RT 剩余</th><th>请求 · Tokens</th><th>操作</th></tr></thead>
+      <tbody id="acct-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ===== 在线测试 ===== -->
+<div class="section" id="section-test">
+  <div class="card">
+    <div class="card-header"><h2>在线 LLM 测试</h2>
+      <button class="btn btn-sm btn-secondary" onclick="loadTestTab()">刷新模型/账号</button></div>
+    <div class="card-body">
+      <div class="grid-2">
+        <div class="form-group"><label class="form-label">模型</label>
+          <select class="form-input" id="t-model"></select></div>
+        <div class="form-group"><label class="form-label">指定账号（可选）</label>
+          <select class="form-input" id="t-account"><option value="0">自动（轮询池）</option></select></div>
+      </div>
+      <div class="form-group"><label class="form-label">提示词</label>
+        <textarea class="form-input" id="t-prompt" rows="3">用一句话介绍你自己，并说明你是什么模型</textarea></div>
+      <button class="btn btn-primary" onclick="runTest()">▶ 发送</button>
+      <div id="t-result" style="margin-top:16px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== API 密钥 ===== -->
+<div class="section" id="section-keys">
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="showModal('createKeyModal')">+ 新建密钥</button>
+    <button class="btn btn-secondary" onclick="loadKeys()">刷新</button>
+    <span class="toolbar-title">密钥仅可调用 /v1/* LLM 接口，不提供管理面访问</span>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>密钥列表</h2></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>名称</th><th>前缀</th><th>状态</th><th>用量</th><th>最后使用</th><th>过期</th><th>创建时间</th><th>操作</th></tr></thead>
+      <tbody id="keys-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ===== 模型 ===== -->
+<div class="section" id="section-models">
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="syncModels()">⟳ 从上游同步</button>
+    <span class="toolbar-title">目录来源：上游 autoclaw-model-config（启动自动同步）</span>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>模型目录</h2></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>路由 ID</th><th>名称</th><th>推理</th><th>输入</th><th>上下文</th><th>maxTokens</th><th>说明</th></tr></thead>
+      <tbody id="model-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ===== 出口代理 ===== -->
+<div class="section" id="section-proxy">
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="openProxyModal()">+ 添加节点</button>
+    <button class="btn btn-secondary" onclick="loadProxies()">刷新</button>
+    <button class="btn btn-secondary" onclick="detectProxy()">🔍 探测本机代理</button>
+    <span class="hint-block" id="proxy-detect"></span>
+    <span class="toolbar-title">按账号分组绑定；空分组=默认节点；无节点=直连</span>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>代理节点</h2></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>地址</th><th>分组</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody id="proxy-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ===== 调用日志 ===== -->
+<div class="section" id="section-logs">
+  <div class="toolbar">
+    <button class="btn btn-secondary" onclick="loadUsage()">⟳ 刷新</button>
+    <span class="toolbar-title">最近 100 次 LLM 调用</span>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>调用记录</h2></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>时间</th><th>账号</th><th>请求模型</th><th>路由</th><th>状态</th><th>流式</th><th>Tokens(入/出)</th><th>TTFT</th><th>耗时</th><th>错误</th></tr></thead>
+      <tbody id="usage-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ===== 设置 ===== -->
+<div class="section" id="section-settings">
+  <div class="card">
+    <div class="card-header"><h2>网关设置</h2></div>
+    <div class="card-body">
+      <div class="grid-2">
+        <div class="form-group"><label class="form-label">上游主机（默认生产加速域名）</label>
+          <input class="form-input" id="st-upstream_host" placeholder="https://autoglm-acceleration-api.zhipuai.cn"></div>
+        <div class="form-group"><label class="form-label">全局出口代理（兜底）</label>
+          <input class="form-input" id="st-upstream_proxy" placeholder="socks5://127.0.0.1:7890 或留空直连"></div>
+        <div class="form-group"><label class="form-label">账号池策略</label>
+          <select class="form-input" id="st-pool_strategy">
+            <option value="round_robin">round_robin 轮询</option>
+            <option value="random">random 随机</option>
+            <option value="least_used">least_used 最少使用</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">TLS 指纹</label>
+          <select class="form-input" id="st-tls_mode"></select></div>
+        <div class="form-group"><label class="form-label">自定义 JA3（指纹=custom 时）</label>
+          <input class="form-input" id="st-tls_ja3" placeholder="771,4865-4866-…,0-23-…,29-23-24,0"></div>
+        <div class="form-group"><label class="form-label">监听地址（重启生效）</label>
+          <input class="form-input" id="st-listen_addr" placeholder="127.0.0.1:8317"></div>
+        <div class="form-group"><label class="form-label">登录桥出口代理（换干净 IP 规避风控黑名单）</label>
+          <input class="form-input" id="st-login_proxy" placeholder="socks5://host:port 或 http://host:port，留空=本机 IP"></div>
+      </div>
+      <div class="section-subhead">阿里云验证码兜底（CN 短信登录当前无需；风控要求时启用）</div>
+      <div class="grid-3">
+        <div class="form-group"><label class="form-label">启用</label>
+          <select class="form-input" id="st-captcha_enabled"><option value="">否</option><option value="1">是</option></select></div>
+        <div class="form-group"><label class="form-label">prefix / region / scene_id</label>
+          <div style="display:flex;gap:8px">
+            <input class="form-input" id="st-captcha_prefix" style="flex:1">
+            <input class="form-input" id="st-captcha_region" placeholder="cn" style="flex:.6">
+            <input class="form-input" id="st-captcha_scene_id" style="flex:1"></div></div>
+        <div class="form-group"><label class="form-label">同源页面 URL</label>
+          <input class="form-input" id="st-captcha_page_url" placeholder="https://autoglm.aminer.cn/"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
+        <button class="btn btn-secondary" onclick="browserCheck()">🌐 浏览器指纹自检</button>
+      </div>
+      <pre class="out" id="browser-out" style="display:none;margin-top:14px"></pre>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>修改管理密码</h2></div>
+    <div class="card-body">
+      <div class="grid-2">
+        <div class="form-group"><label class="form-label">当前密码</label>
+          <input class="form-input" id="pw-old" type="password" autocomplete="current-password"></div>
+        <div class="form-group"><label class="form-label">新密码（≥6 位）</label>
+          <input class="form-input" id="pw-new" type="password" autocomplete="new-password"></div>
+      </div>
+      <button class="btn btn-primary" onclick="changePassword()">修改密码</button>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+
+<!-- ===== 验证码登录向导弹窗 ===== -->
+<div class="modal-overlay" id="smsModal">
+  <div class="modal">
+    <h3>📱 短信验证码登录（自动伪造新设备身份）</h3>
+    <div class="steps">
+      <div class="step" id="step1-ind"><span class="n">1</span>填手机号</div>
+      <div class="step-arrow">→</div>
+      <div class="step" id="step2-ind"><span class="n">2</span>填短信码</div>
+    </div>
+    <div id="sms-step1">
+      <div class="alert-banner warn" style="margin-bottom:14px">
+        <span>⚠️</span><span>上游登录端点校验客户端 TLS/HTTP2 指纹（仅官方 Electron/真实浏览器可通过）。若提交正确验证码仍返回 400001，属上游反自动化风控，请改用「导入本机登录态」。</span>
+      </div>
+      <div class="form-group"><label class="form-label">手机号</label>
+        <input class="form-input" id="lg-phone" placeholder="11 位手机号" maxlength="11"></div>
+      <div class="form-group"><label class="form-label">分组（可选，绑定出口代理）</label>
+        <input class="form-input" id="lg-group" placeholder="如 group-a，留空=默认"></div>
+      <div class="form-group"><label class="form-label">设备身份</label>
+        <div class="seg-toggle" id="lg-device-toggle">
+          <div class="seg active" data-real="1" onclick="setDeviceMode(1)">复用本机真实设备（推荐）</div>
+          <div class="seg" data-real="0" onclick="setDeviceMode(0)">伪造新设备</div>
+        </div>
+        <div class="hint-block" id="lg-device-hint">复用本机 AutoClaw 已绑定的真实设备身份，最不易触发风控；伪造新设备用于与官方客户端隔离的多开账号。</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="hideModal('smsModal')">取消</button>
+        <button class="btn btn-primary" id="btn-send" onclick="sendCode()">发送验证码 →</button>
+      </div>
+    </div>
+    <div id="sms-step2" style="display:none">
+      <div class="hint-block" style="margin-bottom:12px">验证码已发送至 <b id="lg-phone-echo"></b>（60s 内有效，未收到可返回重发）</div>
+      <div class="form-group"><label class="form-label">短信验证码（6 位数字）</label>
+        <input class="form-input" id="lg-code" placeholder="收到短信后填入" maxlength="6" inputmode="numeric"></div>
+      <div class="hint-block" id="lg-status"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="smsBack()">← 返回重发</button>
+        <button class="btn btn-success" id="btn-verify" onclick="verifyLogin()">登录并入库</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 添加/编辑代理节点弹窗 ===== -->
+<div class="modal-overlay" id="proxyModal">
+  <div class="modal">
+    <h3 id="proxyModalTitle">添加代理节点</h3>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">名称</label>
+        <input class="form-input" id="px-name" placeholder="节点名"></div>
+      <div class="form-group"><label class="form-label">类型</label>
+        <select class="form-input" id="px-type"><option value="socks5">socks5</option><option value="http">http</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2"><label class="form-label">主机</label>
+        <input class="form-input" id="px-host" placeholder="127.0.0.1"></div>
+      <div class="form-group"><label class="form-label">端口</label>
+        <input class="form-input" id="px-port" type="number" placeholder="7890"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">用户名</label>
+        <input class="form-input" id="px-user" placeholder="留空=无认证"></div>
+      <div class="form-group"><label class="form-label">密码</label>
+        <input class="form-input" id="px-pass" type="password" placeholder="编辑时留空=不变"></div>
+    </div>
+    <div class="form-group"><label class="form-label">分组</label>
+      <input class="form-input" id="px-group" placeholder="留空=默认节点；与账号分组同名则绑定"></div>
+    <input type="hidden" id="px-id" value="0">
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="hideModal('proxyModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveProxy()">保存节点</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 新建密钥弹窗 ===== -->
+<div class="modal-overlay" id="createKeyModal">
+  <div class="modal">
+    <h3>新建 LLM API 密钥</h3>
+    <div id="keyForm">
+      <div class="form-group"><label class="form-label">名称（用途标识）</label>
+        <input class="form-input" id="nk-name" placeholder="如 my-coding-cli"></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">请求配额（0=不限）</label>
+          <input class="form-input" id="nk-max" type="number" min="0" value="0"></div>
+        <div class="form-group"><label class="form-label">有效期（天，0=永久）</label>
+          <input class="form-input" id="nk-days" type="number" min="0" value="0"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="hideModal('createKeyModal')">取消</button>
+        <button class="btn btn-primary" onclick="createKey()">创建</button>
+      </div>
+    </div>
+    <div id="keyResult" style="display:none">
+      <div class="hint-block" style="color:var(--c-warning-dark);font-weight:600">⚠️ 密钥仅显示这一次，请立即复制保存：</div>
+      <div class="key-once"><div class="k" id="nk-fullkey"></div></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="copyFullKey()">复制</button>
+        <button class="btn btn-primary" onclick="closeKeyModal()">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/web/static/app.js"></script>
+</body>
+</html>

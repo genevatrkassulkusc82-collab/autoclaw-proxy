@@ -85,11 +85,13 @@ func main() {
 		}
 	}
 
-	// 启动时尝试同步一次模型目录（失败静默，用内置兜底）
+	// 启动时按区域同步模型目录（失败静默，用内置兜底）
 	go func() {
 		time.Sleep(2 * time.Second)
-		if _, err := llm.SyncCatalog(); err != nil {
-			log.Printf("[main] 模型目录同步失败（用内置兜底）: %v", err)
+		if res := llm.SyncAllCatalogs(); len(res) == 0 {
+			log.Printf("[main] 模型目录同步失败（用内置兜底）")
+		} else {
+			log.Printf("[main] 模型目录同步: %v", res)
 		}
 	}()
 

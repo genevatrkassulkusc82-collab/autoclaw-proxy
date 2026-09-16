@@ -46,10 +46,10 @@ const (
 
 // UserAPIClient 封装签名与主机选择；每个账号组可绑定不同出口代理
 type UserAPIClient struct {
-	Host      string // userapi/代理主机（默认生产加速域名）
-	ProxyURL  string // 出口代理（空=直连）
-	Timeout   time.Duration
-	Lang      string // X-Lang（空=默认 zh-CN；海外账号传 "en"）
+	Host     string // userapi/代理主机（默认生产加速域名）
+	ProxyURL string // 出口代理（空=直连）
+	Timeout  time.Duration
+	Lang     string // X-Lang（空=默认 zh-CN；海外账号传 "en"）
 	// Bridge 可选：真实浏览器 HTTP 桥（go-rod 页面内 fetch），借用浏览器真实
 	// TLS/HTTP2/TCP/cookie 指纹。用于被风控仅认官方客户端指纹的高风险端点（login）。
 	Bridge func(method, url string, headers map[string]string, body string) (int, string, error)
@@ -242,12 +242,12 @@ func (c *UserAPIClient) SendCode(deviceID, phone string) (*APIEnvelope, error) {
 
 // LoginResult agent-login data
 type LoginResult struct {
-	AccessToken   string `json:"access_token"`
-	RefreshToken  string `json:"refresh_token"`
+	AccessToken   string      `json:"access_token"`
+	RefreshToken  string      `json:"refresh_token"`
 	UserID        json.Number `json:"user_id"`
-	UserName      string `json:"user_name"`
-	FirstLogin    bool   `json:"first_login"`
-	WebFirstLogin bool   `json:"web_first_login"`
+	UserName      string      `json:"user_name"`
+	FirstLogin    bool        `json:"first_login"`
+	WebFirstLogin bool        `json:"web_first_login"`
 }
 
 // Login 短信验证码登录
@@ -328,15 +328,15 @@ func (c *UserAPIClient) UserProfile(deviceID, accessToken string) (map[string]in
 
 // RemoteModel 远端 autoclaw-model-config 的模型条目（截取关心字段）
 type RemoteModel struct {
-	ID                    string   `json:"id"`
-	Name                  string   `json:"name"`
-	Reasoning             bool     `json:"reasoning"`
-	Input                 []string `json:"input"`
-	ContextWindow         int64    `json:"contextWindow"`
-	MaxTokens             int64    `json:"maxTokens"`
-	Tooltip               string   `json:"tooltip"`
-	CreditConsumptionLevel string  `json:"creditConsumptionLevel"`
-	Metadata              map[string]interface{} `json:"metadata"`
+	ID                     string                 `json:"id"`
+	Name                   string                 `json:"name"`
+	Reasoning              bool                   `json:"reasoning"`
+	Input                  []string               `json:"input"`
+	ContextWindow          int64                  `json:"contextWindow"`
+	MaxTokens              int64                  `json:"maxTokens"`
+	Tooltip                string                 `json:"tooltip"`
+	CreditConsumptionLevel string                 `json:"creditConsumptionLevel"`
+	Metadata               map[string]interface{} `json:"metadata"`
 }
 
 // FetchModelCatalog GET {host}/autoclaw-proxy/proxy/autoclaw-model-config

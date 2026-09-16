@@ -51,21 +51,29 @@ func openaiError(w http.ResponseWriter, status int, errType, msg string) {
 }
 
 func (h *OpenAIHandler) handleModels(w http.ResponseWriter, r *http.Request) {
+	regionParam := r.URL.Query().Get("region")
 	if r.URL.Query().Get("sync") == "1" {
-		if _, err := h.llm.SyncCatalog(); err != nil {
-			log.Printf("[openai] models 同步失败: %v", err)
-			// 同步失败回退缓存/内置
+		if regionParam != "" {
+			if _, err := h.llm.SyncCatalog(NormalizeRegion(regionParam)); err != nil {
+				log.Printf("[openai] models 同步失败(%s): %v", regionParam, err)
+			}
+		} else {
+			h.llm.SyncAllCatalogs() // 同步所有"有账号"的区域
 		}
 	}
-	catalog := h.llm.Catalog()
+	// 默认返回所有有账号区域的并集；?region=cn|oversea 只看单区域
+	catalog := h.llm.CatalogUnion()
+	if regionParam != "" {
+		catalog = h.llm.Catalog(NormalizeRegion(regionParam))
+	}
 	type modelObj struct {
-		ID       string `json:"id"`
-		Object   string `json:"object"`
-		Created  int64  `json:"created"`
-		OwnedBy  string `json:"owned_by"`
-		Reasoning bool  `json:"reasoning,omitempty"`
-		ContextWindow int64 `json:"context_window,omitempty"`
-		MaxTokens     int64 `json:"max_tokens,omitempty"`
+		ID            string `json:"id"`
+		Object        string `json:"object"`
+		Created       int64  `json:"created"`
+		OwnedBy       string `json:"owned_by"`
+		Reasoning     bool   `json:"reasoning,omitempty"`
+		ContextWindow int64  `json:"context_window,omitempty"`
+		MaxTokens     int64  `json:"max_tokens,omitempty"`
 	}
 	now := time.Now().Unix()
 	out := make([]modelObj, 0, len(catalog)*2)

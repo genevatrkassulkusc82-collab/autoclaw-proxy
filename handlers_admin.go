@@ -262,16 +262,26 @@ func (h *AdminHandler) handleLoginVerify(w http.ResponseWriter, r *http.Request)
 // ---- 模型 ----
 
 func (h *AdminHandler) handleModels(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]interface{}{"models": h.llm.Catalog()})
+	models := h.llm.CatalogUnion()
+	if regionParam := r.URL.Query().Get("region"); regionParam != "" {
+		models = h.llm.Catalog(NormalizeRegion(regionParam))
+	}
+	writeJSON(w, 200, map[string]interface{}{"models": models, "regions": AllRegions()})
 }
 
 func (h *AdminHandler) handleModelsSync(w http.ResponseWriter, r *http.Request) {
-	models, err := h.llm.SyncCatalog()
-	if err != nil {
-		writeErr(w, 502, err.Error())
+	if regionParam := r.URL.Query().Get("region"); regionParam != "" {
+		rg := NormalizeRegion(regionParam)
+		models, err := h.llm.SyncCatalog(rg)
+		if err != nil {
+			writeErr(w, 502, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]interface{}{"models": models, "count": len(models), "region": string(rg)})
 		return
 	}
-	writeJSON(w, 200, map[string]interface{}{"models": models, "count": len(models)})
+	synced := h.llm.SyncAllCatalogs() // 不指定区域=同步所有有账号的区域
+	writeJSON(w, 200, map[string]interface{}{"synced": synced, "models": h.llm.CatalogUnion()})
 }
 
 // ---- 代理 ----
@@ -428,10 +438,10 @@ func (h *AdminHandler) handleBrowserCheck(w http.ResponseWriter, r *http.Request
 
 func (h *AdminHandler) handleTestChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Model    string `json:"model"`
-		Prompt   string `json:"prompt"`
-		Stream   bool   `json:"stream"`
-		AccountID int64 `json:"account_id"`
+		Model     string `json:"model"`
+		Prompt    string `json:"prompt"`
+		Stream    bool   `json:"stream"`
+		AccountID int64  `json:"account_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "请求体解析失败")
@@ -475,7 +485,7 @@ func (h *AdminHandler) handleTestChat(w http.ResponseWriter, r *http.Request) {
 		"route": result.Route, "account_id": result.Account.ID,
 		"upstream_model": resp["model"], "content": content,
 		"reasoning_preview": truncate(reasoning, 200),
-		"usage": resp["usage"], "elapsed_ms": time.Since(start).Milliseconds(),
+		"usage":             resp["usage"], "elapsed_ms": time.Since(start).Milliseconds(),
 	})
 }
 

@@ -12,16 +12,31 @@ import (
 	"time"
 )
 
+// WalletBrief 积分钱包明细
+type WalletBrief struct {
+	WalletID    string `json:"wallet_id"`
+	Type        string `json:"wallet_type"`
+	Name        string `json:"wallet_name"`
+	Scope       string `json:"wallet_scope"`
+	Balance     int64  `json:"balance"`
+	BalanceView string `json:"balance_view"`
+	EffectiveAt string `json:"effective_at"`
+	ExpiresAt   string `json:"expires_at"`
+	Status      string `json:"status"`
+}
+
 // QuotaInfo 单账号额度视图
 type QuotaInfo struct {
-	AccountID   int64                  `json:"account_id"`
-	IsMember    bool                   `json:"is_member"`
-	HasCodePlan bool                   `json:"has_code_plan"`
-	Subscribe   json.RawMessage        `json:"subscribe_list"`
-	Plans       []PlanBrief            `json:"plans"`
-	LocalUsage  UsageSummary           `json:"local_usage"`
-	FetchedAt   int64                  `json:"fetched_at"`
-	UpstreamErr string                 `json:"upstream_error,omitempty"`
+	AccountID    int64           `json:"account_id"`
+	TotalBalance int64           `json:"total_balance"` // 剩余积分（上游 wallet-instances）
+	Wallets      []WalletBrief   `json:"wallets"`
+	IsMember     bool            `json:"is_member"`
+	HasCodePlan  bool            `json:"has_code_plan"`
+	Subscribe    json.RawMessage `json:"subscribe_list"`
+	Plans        []PlanBrief     `json:"plans"`
+	LocalUsage   UsageSummary    `json:"local_usage"`
+	FetchedAt    int64           `json:"fetched_at"`
+	UpstreamErr  string          `json:"upstream_error,omitempty"`
 }
 
 // PlanBrief 套餐额度摘要
@@ -45,13 +60,42 @@ type UsageSummary struct {
 }
 
 // fetchUpstreamQuota 用账号 token 调上游 subscribe-info + product-info
-func (h *AdminHandler) fetchUpstreamQuota(a *Account) (isMember, hasCodePlan bool, subscribe json.RawMessage, plans []PlanBrief, upErr string) {
+func (h *AdminHandler) fetchUpstreamQuota(a *Account) (totalBalance int64, wallets []WalletBrief, isMember, hasCodePlan bool, subscribe json.RawMessage, plans []PlanBrief, upErr string) {
 	client := NewUserAPIClient(hostSetting(h.db), h.pool.egress.ProxyURLForAccount(a))
 	client.Bridge = nil // 额度查询走 Go 客户端即可（非高风险登录端点）
 	hdrs := commonHeaders("Bearer " + a.AccessToken)
 
 	call := func(path string) ([]byte, error) {
 		return client.postRaw(path, hdrs, []byte("{}"))
+	}
+	if raw, err := call("/agent-assetmgr/api/v1/wallet-instances"); err == nil {
+		var out struct {
+			Code int `json:"code"`
+			Data struct {
+				TotalBalance   int64 `json:"total_balance"`
+				WalletInstances []struct {
+					WalletID    string `json:"wallet_id"`
+					WalletType  string `json:"wallet_type"`
+					WalletName  string `json:"wallet_name"`
+					WalletScope string `json:"wallet_scope"`
+					Balance     int64  `json:"balance"`
+					BalanceView string `json:"balance_view"`
+					EffectiveAt string `json:"effective_at"`
+					ExpiresAt   string `json:"expires_at"`
+					Status      string `json:"status"`
+				} `json:"wallet_instances"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(raw, &out) == nil && out.Code == 0 {
+			totalBalance = out.Data.TotalBalance
+			for _, w := range out.Data.WalletInstances {
+				wallets = append(wallets, WalletBrief{WalletID: w.WalletID, Type: w.WalletType, Name: w.WalletName,
+					Scope: w.WalletScope, Balance: w.Balance, BalanceView: w.BalanceView,
+					EffectiveAt: w.EffectiveAt, ExpiresAt: w.ExpiresAt, Status: w.Status})
+			}
+		}
+	} else if upErr == "" {
+		upErr = "wallet-instances: " + err.Error()
 	}
 	if raw, err := call("/agentpay/v1/assistant/subscribe-info"); err == nil {
 		var out struct {
@@ -127,9 +171,10 @@ func (h *AdminHandler) handleAccountQuota(w http.ResponseWriter, r *http.Request
 		writeErr(w, 404, err.Error())
 		return
 	}
-	isMember, hasCodePlan, subscribe, plans, upErr := h.fetchUpstreamQuota(a)
+	totalBalance, wallets, isMember, hasCodePlan, subscribe, plans, upErr := h.fetchUpstreamQuota(a)
 	q := QuotaInfo{
-		AccountID: id, IsMember: isMember, HasCodePlan: hasCodePlan,
+		AccountID: id, TotalBalance: totalBalance, Wallets: wallets,
+		IsMember: isMember, HasCodePlan: hasCodePlan,
 		Subscribe: subscribe, Plans: plans,
 		LocalUsage: h.localUsageSummary(id),
 		FetchedAt:  time.Now().Unix(),
@@ -146,9 +191,10 @@ func (h *AdminHandler) handleAccountsQuotaAll(w http.ResponseWriter, r *http.Req
 	}
 	out := make([]QuotaInfo, 0, len(accounts))
 	for _, a := range accounts {
-		isMember, hasCodePlan, _, plans, upErr := h.fetchUpstreamQuota(a)
+		totalBalance, wallets, isMember, hasCodePlan, _, plans, upErr := h.fetchUpstreamQuota(a)
 		out = append(out, QuotaInfo{
-			AccountID: a.ID, IsMember: isMember, HasCodePlan: hasCodePlan,
+			AccountID: a.ID, TotalBalance: totalBalance, Wallets: wallets,
+			IsMember: isMember, HasCodePlan: hasCodePlan,
 			Plans: plans, LocalUsage: h.localUsageSummary(a.ID),
 			FetchedAt: time.Now().Unix(), UpstreamErr: upErr,
 		})

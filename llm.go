@@ -81,6 +81,17 @@ func (c *LLMCaller) ChatCompletions(ctx context.Context, requestBody map[string]
 	tried := map[int64]bool{}
 	var lastErr error
 
+	// 预计算"哪些区域的目录能解析该模型"（国内/海外清单可能不同）：
+	// 调度时只在支持该模型的区域内选账号。只算一次，避免每账号重复查目录。
+	servableRegions := map[Region]bool{}
+	if accountID == 0 {
+		for _, rg := range c.pool.RegionsWithAccounts() {
+			if _, rerr := c.ResolveRoute(reqModel, rg); rerr == nil {
+				servableRegions[rg] = true
+			}
+		}
+	}
+
 	for attempt := 0; attempt < 4; attempt++ {
 		var a *Account
 		var err error
@@ -93,8 +104,14 @@ func (c *LLMCaller) ChatCompletions(ctx context.Context, requestBody map[string]
 				break // 指定账号不轮换
 			}
 		} else {
-			a, err = c.pool.Pick(strategy)
+			// 只在"区域目录能解析该模型"的账号中选（国内/海外模型清单可能不同）
+			a, err = c.pool.PickFiltered(strategy, func(acc *Account) bool {
+				return servableRegions[accountRegion(acc)]
+			})
 			if err != nil {
+				if err == errNoAccountForFilter {
+					return nil, &ModelError{Model: reqModel} // 有账号但其区域目录无此模型
+				}
 				if lastErr != nil {
 					return nil, lastErr
 				}
@@ -149,7 +166,7 @@ func asCooldownErr(err error, target **errAccountCooldown) bool {
 
 // callWithAccount 单账号调用（含 401 刷新重试一次）
 func (c *LLMCaller) callWithAccount(ctx context.Context, a *Account, reqModel string, requestBody map[string]interface{}) (*LLMResult, error) {
-	route, err := c.ResolveRoute(reqModel)
+	route, err := c.ResolveRoute(reqModel, accountRegion(a))
 	if err != nil {
 		return nil, err
 	}
@@ -269,12 +286,12 @@ func isInvalidBodyRejection(resp *http.Response) bool {
 //  2. 命中去前缀名（如 "auto"、"glm-5.3-flash"）→ 对应完整 id
 //  3. 命中别名（auto-fast/glm5.3 等宽松匹配）
 //  4. 都不中 → 报 404 model not found
-func (c *LLMCaller) ResolveRoute(model string) (string, error) {
+func (c *LLMCaller) ResolveRoute(model string, region Region) (string, error) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return "", fmt.Errorf("model 不能为空")
 	}
-	catalog := c.Catalog()
+	catalog := c.Catalog(region)
 	// 1 精确
 	for _, m := range catalog {
 		if m.ID == model {
@@ -306,9 +323,9 @@ func (e *ModelError) Error() string {
 	return fmt.Sprintf("The model `%s` does not exist", e.Model)
 }
 
-// Catalog 当前模型目录（远端缓存 + 内置兜底）
-func (c *LLMCaller) Catalog() []RemoteModel {
-	if raw := c.db.LoadModelCatalog(); len(raw) > 0 {
+// Catalog 指定区域的模型目录（远端缓存 + 内置兜底）
+func (c *LLMCaller) Catalog(region Region) []RemoteModel {
+	if raw := c.db.LoadModelCatalog(region); len(raw) > 0 {
 		var models []RemoteModel
 		if json.Unmarshal(raw, &models) == nil && len(models) > 0 {
 			return models
@@ -317,12 +334,33 @@ func (c *LLMCaller) Catalog() []RemoteModel {
 	return builtinCatalog()
 }
 
-// SyncCatalog 从上游同步模型目录（用任一健康账号的 token）
-func (c *LLMCaller) SyncCatalog() ([]RemoteModel, error) {
-	a, err := c.pool.Pick("round_robin")
+// CatalogUnion 所有"有账号的区域"目录的并集（按 ID 去重），用于 /v1/models 默认列表。
+// 同一 ID 在多区域都存在时只列一次——调度时再按账号区域各自解析路由。
+func (c *LLMCaller) CatalogUnion() []RemoteModel {
+	regions := c.pool.RegionsWithAccounts()
+	if len(regions) == 0 {
+		regions = []Region{DefaultRegion}
+	}
+	seen := map[string]bool{}
+	var out []RemoteModel
+	for _, rg := range regions {
+		for _, m := range c.Catalog(rg) {
+			if seen[m.ID] {
+				continue
+			}
+			seen[m.ID] = true
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// SyncCatalog 同步指定区域的模型目录（用该区域任一健康账号的 token）
+func (c *LLMCaller) SyncCatalog(region Region) ([]RemoteModel, error) {
+	a, err := c.pool.PickInRegion("round_robin", region)
 	if err != nil {
-		// 无账号也允许同步：模型配置接口实测需要登录头，但可先试匿名
-		a = &Account{}
+		// 该区域无账号：用空账号匿名尝试（多半失败，保留兜底语义）
+		a = &Account{Region: string(region)}
 	}
 	at := a.AccessToken
 	if at != "" && TokenRemaining(at) < 2*time.Minute && a.ID > 0 {
@@ -337,11 +375,28 @@ func (c *LLMCaller) SyncCatalog() ([]RemoteModel, error) {
 		return nil, err
 	}
 	raw, _ := json.Marshal(models)
-	if err := c.db.SaveModelCatalog(raw); err != nil {
-		log.Printf("[models] 目录缓存写入失败: %v", err)
+	if err := c.db.SaveModelCatalog(region, raw); err != nil {
+		log.Printf("[models] %s 目录缓存写入失败: %v", region, err)
 	}
-	log.Printf("[models] 同步成功: %d 个模型", len(models))
+	log.Printf("[models] %s 同步成功: %d 个模型", region, len(models))
 	return models, nil
+}
+
+// SyncAllCatalogs 对所有"有账号的区域"分别同步目录；返回各区域同步到的模型数
+func (c *LLMCaller) SyncAllCatalogs() map[string]int {
+	out := map[string]int{}
+	regions := c.pool.RegionsWithAccounts()
+	if len(regions) == 0 {
+		regions = []Region{DefaultRegion}
+	}
+	for _, rg := range regions {
+		if ms, err := c.SyncCatalog(rg); err != nil {
+			log.Printf("[models] %s 同步失败: %v", rg, err)
+		} else {
+			out[string(rg)] = len(ms)
+		}
+	}
+	return out
 }
 
 // builtinCatalog 内置兜底目录（2026-09-15 实测下发内容的快照）

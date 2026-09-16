@@ -21,7 +21,8 @@ type DB struct {
 
 // Account 账号记录
 // 状态机: active → cooldown(429/5xx 退避) → active
-//          active → refreshing → active | needs_login(rt 失效) | disabled(手动)
+//
+//	active → refreshing → active | needs_login(rt 失效) | disabled(手动)
 type Account struct {
 	ID            int64  `json:"id"`
 	UserID        string `json:"user_id"`
@@ -54,7 +55,7 @@ type ProxyNode struct {
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`
 	Group    string `json:"group"` // 空=默认节点
-	Type     string `json:"type"` // socks5|http
+	Type     string `json:"type"`  // socks5|http
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Username string `json:"username"`
@@ -490,13 +491,17 @@ func (d *DB) Stats() map[string]interface{} {
 	return out
 }
 
-// ModelCatalogCache 模型目录缓存（settings 表 JSON）
-func (d *DB) SaveModelCatalog(models json.RawMessage) error {
-	return d.SetSetting("model_catalog", string(models))
+// ModelCatalogCache 模型目录缓存（settings 表 JSON，按区域分键）
+// 国内/海外模型清单可能不同，分别缓存于 model_catalog:cn / model_catalog:oversea。
+func (d *DB) SaveModelCatalog(region Region, models json.RawMessage) error {
+	return d.SetSetting("model_catalog:"+string(region), string(models))
 }
 
-func (d *DB) LoadModelCatalog() json.RawMessage {
-	v, _ := d.GetSetting("model_catalog")
+func (d *DB) LoadModelCatalog(region Region) json.RawMessage {
+	v, _ := d.GetSetting("model_catalog:" + string(region))
+	if v == "" && region == RegionCN {
+		v, _ = d.GetSetting("model_catalog") // 兼容老库的单一缓存键
+	}
 	if v == "" {
 		return nil
 	}

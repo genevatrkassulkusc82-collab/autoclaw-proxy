@@ -134,6 +134,7 @@ function fmtTime(s) {
 }
 function fmtTs(ms) { return ms ? new Date(ms).toLocaleString() : '-'; }
 function fmtNum(n) { return Number(n || 0).toLocaleString(); }
+function fmtPoints(n) { n = Number(n || 0); if (n >= 10000) return (n / 10000).toFixed(2) + '万'; return String(n); }
 function fmtDurH(h) {
   if (h == null) return '-';
   if (h < 0) return '<span class="badge badge-danger">已过期</span>';
@@ -232,7 +233,7 @@ async function loadAccounts() {
         if (q.is_member) tags.push('<span class="badge badge-success">会员</span>');
         if (q.has_code_plan) tags.push('<span class="badge badge-info">编码计划</span>');
         if (!tags.length) tags.push('<span class="badge badge-muted">免费</span>');
-        quotaCell = tags.join(' ') + `<div class="dim">本地 ${q.local_usage.total_requests} 次 / ${fmtNum(q.local_usage.total_tokens)} tok</div>`;
+        quotaCell = `<div style="font-weight:700;color:var(--c-primary)">💎 ${fmtPoints(q.total_balance)}</div>` + tags.join(' ') + `<div class="dim">本地 ${q.local_usage.total_requests} 次 / ${fmtNum(q.local_usage.total_tokens)} tok</div>`;
       }
       return `<tr>
       <td>${a.id}</td>
@@ -301,8 +302,12 @@ async function showQuota(id) {
     if (q.has_code_plan) tags.push('<span class="badge badge-info">编码计划</span>');
     if (!tags.length) tags.push('<span class="badge badge-muted">免费档</span>');
     let plans = (q.plans || []).map(p => `<tr><td>${esc(p.name)}</td><td>Lv${p.level}</td><td>${p.send_score_day}/天</td><td>${fmtNum(p.send_score_month)}/月</td><td>¥${(p.price / 100).toFixed(2)}</td></tr>`).join('');
+    const wallets = (q.wallets || []).map(w => `<tr><td class="mono">${esc(w.wallet_name || w.wallet_id)}</td><td>${esc(w.wallet_type)}</td><td>${esc(w.wallet_scope)}</td><td style="font-weight:700">${fmtNum(w.balance)}</td><td>${esc(w.balance_view)}</td><td class="mono dim">${esc((w.expires_at || '').slice(0, 10))}</td><td>${w.status === 'active' ? '<span class="badge badge-success">active</span>' : '<span class="badge badge-muted">' + esc(w.status) + '</span>'}</td></tr>`).join('');
     $('#quota-body').innerHTML = `
-      <div class="hint-block" style="margin-bottom:10px">身份：${tags.join(' ')}　|　上游查询时间：${fmtTs(q.fetched_at * 1000)}${q.upstream_error ? '　<span class="dim">(' + esc(q.upstream_error) + ')</span>' : ''}</div>
+      <div class="stats-bar"><div class="stat-card purple"><div class="stat-body"><div class="label">剩余积分</div><div class="value">${fmtPoints(q.total_balance)}</div><div class="sub">${fmtNum(q.total_balance)} 点</div></div></div></div>
+      <div class="section-subhead">积分钱包明细（上游 wallet-instances）</div>
+      <div class="table-wrap" style="max-height:200px;overflow-y:auto"><table class="mini-table"><thead><tr><th>钱包</th><th>类型</th><th>范围</th><th>余额</th><th>视图</th><th>到期</th><th>状态</th></tr></thead><tbody>${wallets || '<tr><td colspan="7"><div class="empty"><p>无钱包数据</p></div></td></tr>'}</tbody></table></div>
+      <div class="hint-block" style="margin:10px 0">身份：${tags.join(' ')}　|　上游查询时间：${fmtTs(q.fetched_at * 1000)}${q.upstream_error ? '　<span class="dim">(' + esc(q.upstream_error) + ')</span>' : ''}</div>
       <div class="section-subhead">套餐额度目录（上游 product-info）</div>
       <div class="table-wrap"><table class="mini-table"><thead><tr><th>套餐</th><th>档位</th><th>积分/天</th><th>积分/月</th><th>价格</th></tr></thead><tbody>${plans || '<tr><td colspan="5"><div class="empty"><p>无套餐数据</p></div></td></tr>'}</tbody></table></div>
       <div class="section-subhead">本地用量（经过本网关）</div>

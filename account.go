@@ -23,7 +23,7 @@ import (
 
 // AccountPool 账号池
 type AccountPool struct {
-	db   *DB
+	db     *DB
 	egress *EgressResolver
 
 	mu        sync.Mutex
@@ -67,9 +67,18 @@ func (p *AccountPool) accountLock(id int64) *sync.Mutex {
 
 var errNoAccount = errors.New("无可用账号（全部冷却/失效/未添加）")
 
+// errNoAccountForFilter 有可用账号，但没有一个通过筛选（如：没有账号的区域支持该模型）
+var errNoAccountForFilter = errors.New("无匹配账号")
+
 // Pick 按策略选取可用账号；cooldown 到期自动复活
 // strategy: round_robin(默认) | random | least_used
 func (p *AccountPool) Pick(strategy string) (*Account, error) {
+	return p.PickFiltered(strategy, nil)
+}
+
+// PickFiltered 在可用账号中再用 filter 二次筛选（filter=nil 不筛）后按策略选取。
+// 返回 errNoAccount=无任何可用账号；errNoAccountForFilter=有可用账号但都不满足 filter。
+func (p *AccountPool) PickFiltered(strategy string, filter func(*Account) bool) (*Account, error) {
 	all, err := p.db.ListAccounts()
 	if err != nil {
 		return nil, err
@@ -94,6 +103,18 @@ func (p *AccountPool) Pick(strategy string) (*Account, error) {
 	if len(usable) == 0 {
 		return nil, errNoAccount
 	}
+	if filter != nil {
+		filtered := make([]*Account, 0, len(usable))
+		for _, a := range usable {
+			if filter(a) {
+				filtered = append(filtered, a)
+			}
+		}
+		if len(filtered) == 0 {
+			return nil, errNoAccountForFilter
+		}
+		usable = filtered
+	}
 	switch strategy {
 	case "random":
 		return usable[rand.Intn(len(usable))], nil
@@ -107,6 +128,28 @@ func (p *AccountPool) Pick(strategy string) (*Account, error) {
 		p.mu.Unlock()
 		return usable[idx], nil
 	}
+}
+
+// PickInRegion 选取指定区域的可用账号（按区域同步模型目录用）
+func (p *AccountPool) PickInRegion(strategy string, region Region) (*Account, error) {
+	return p.PickFiltered(strategy, func(a *Account) bool { return accountRegion(a) == region })
+}
+
+// RegionsWithAccounts 返回"有启用账号"的区域列表（去重，用于按区域同步/聚合模型）
+func (p *AccountPool) RegionsWithAccounts() []Region {
+	all, _ := p.db.ListAccounts()
+	seen := map[Region]bool{}
+	var out []Region
+	for _, a := range all {
+		if a.Enabled != 1 {
+			continue
+		}
+		if r := accountRegion(a); !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // PickByRoute 指定账号（管理端测试用）
@@ -197,11 +240,11 @@ type SMSLoginFlow struct {
 
 // LoginManager 在线验证码登录管理（每流程伪造新设备身份）
 type LoginManager struct {
-	mu       sync.Mutex
-	flows    map[string]*SMSLoginFlow // flowID → flow
-	db       *DB
-	pool     *AccountPool
-	browser  *BrowserService // 浏览器 HTTP 桥（真实指纹），nil 则用 Go 客户端
+	mu      sync.Mutex
+	flows   map[string]*SMSLoginFlow // flowID → flow
+	db      *DB
+	pool    *AccountPool
+	browser *BrowserService // 浏览器 HTTP 桥（真实指纹），nil 则用 Go 客户端
 }
 
 // NewLoginManager 创建登录管理器

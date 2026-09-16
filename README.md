@@ -114,6 +114,7 @@ autoclaw-client-windows-amd64.exe -server http://<服务器>:8317 -code <配对�
 ```
 
 - 配对码：管理面「🖥 客户端配对码」生成，10 分钟有效；`POST /client/hello` 握手、`POST /client/push` 回传（均以配对码鉴权）。
+- **客户端下载**：配对码弹窗「⬇ 下载客户端」→ `GET /client/download`（会话鉴权）下发 exe 并**把当前服务器地址写入二进制地址槽**，客户端免配置（同 dumate 机制）；未补丁构建回退 `-server` 参数/交互输入。
 - 客户端自包含 enc:v10 解密（DPAPI→AES-256-GCM）与设备身份生成，不依赖网关代码。
 - "某些情况下用客户端本地导入"：本机已有登录态时直接 `import`；被设备拉黑时 `reset` 后手动登录再回传。
 

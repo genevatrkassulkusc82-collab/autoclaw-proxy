@@ -66,6 +66,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	// 客户端远程导入（配对码）
 	mux.HandleFunc("POST /admin/client/code", a(h.handleClientCodeIssue))
 	mux.HandleFunc("GET /admin/client/code", a(h.handleClientCodeCurrent))
+	mux.HandleFunc("GET /client/download", a(h.handleClientDownload))
 	mux.HandleFunc("POST /client/hello", handleClientHello)
 	mux.HandleFunc("POST /client/push", h.handleClientPush)
 	// 本机设备身份重置（供官方手动登录新设备）

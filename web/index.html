@@ -375,8 +375,9 @@ autoclaw-client-windows-amd64.exe -server http://&lt;本服务器&gt;:8317 -code
 # 重置设备+等手动登录后导入（设备拉黑自救）
 autoclaw-client-windows-amd64.exe -server http://&lt;本服务器&gt;:8317 -code &lt;配对码&gt; -mode reset -loop</pre>
     <div class="modal-actions">
-      <button class="btn btn-secondary" onclick="issuePairCode()">重新生成</button>
-      <button class="btn btn-primary" onclick="hideModal('pairModal')">关闭</button>
+      <a class="btn btn-primary" href="/client/download" download>⬇ 下载客户端（已内置服务器地址）</a>
+      <button class="btn btn-secondary" onclick="issuePairCode()">重新生成配对码</button>
+      <button class="btn btn-secondary" onclick="hideModal('pairModal')">关闭</button>
     </div>
   </div>
 </div>

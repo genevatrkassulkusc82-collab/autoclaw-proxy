@@ -36,6 +36,18 @@ import (
 	"unsafe"
 )
 
+// embeddedServerSlot 服务器在 /client/download 时写入二进制的地址槽；
+// 未补丁的原始构建返回空串（回退 -server 参数/交互输入）。
+var embeddedServerSlot = "<<AUTOCLAW_SERVER_URL>>" + strings.Repeat(string(rune(0)), 96)
+
+func embeddedServerURL() string {
+	s := strings.TrimRight(embeddedServerSlot, string(rune(0)))
+	if s == "" || strings.Contains(s, "<<AUTOCLAW_SERVER_URL") {
+		return ""
+	}
+	return s
+}
+
 var (
 	flagServer = flag.String("server", "", "autoclaw-proxy 服务器地址，如 http://your-server:8317")
 	flagCode   = flag.String("code", "", "Web 管理页「客户端配对码」")
@@ -54,6 +66,12 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 	server := strings.TrimRight(*flagServer, "/")
 	code := strings.ToUpper(strings.TrimSpace(*flagCode))
+	if server == "" {
+		server = embeddedServerURL()
+		if server != "" {
+			fmt.Println("服务器地址(已内置):", server)
+		}
+	}
 	if server == "" {
 		fmt.Print("服务器地址 (如 http://1.2.3.4:8317): ")
 		line, _ := reader.ReadString('\n')

@@ -6,12 +6,16 @@ package main
 // 服务端只负责：生成配对码（管理面会话鉴权）、校验配对码、接收账号并 upsert 入池。
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"math/big"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -189,4 +193,72 @@ func (h *AdminHandler) handleClientPush(w http.ResponseWriter, r *http.Request) 
 	}
 	log.Printf("[client] 远程导入账号 id=%d user=%s source=%s", id, acct.UserID, src)
 	writeJSON(w, 200, map[string]interface{}{"ok": true, "account_id": id})
+}
+
+// ---- 客户端下载（下载时把服务器地址写入 exe 地址槽，免配置） ----
+
+const clientSlotMarker = "<<AUTOCLAW_SERVER_URL>>"
+const clientSlotPad = 96
+
+// clientExeCandidates 客户端二进制候选路径（相对服务端可执行目录）
+func clientExeCandidates() []string {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Dir(exe)
+	return []string{
+		filepath.Join(dir, "clients", "autoclaw-client-windows-amd64.exe"),
+		filepath.Join(dir, "autoclaw-client-windows-amd64.exe"),
+	}
+}
+
+// patchClientBinary 将 origin 写入客户端二进制的地址槽
+func patchClientBinary(origin string) ([]byte, error) {
+	var raw []byte
+	var err error
+	for _, p := range clientExeCandidates() {
+		raw, err = os.ReadFile(p)
+		if err == nil {
+			break
+		}
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("未找到客户端二进制（clients/autoclaw-client-windows-amd64.exe）")
+	}
+	idx := bytes.Index(raw, []byte(clientSlotMarker))
+	if idx < 0 {
+		return nil, fmt.Errorf("客户端二进制缺少地址槽")
+	}
+	if len(origin) > clientSlotPad {
+		return nil, fmt.Errorf("服务器地址过长（>%d）", clientSlotPad)
+	}
+	slotStart := idx
+	slotEnd := idx + len(clientSlotMarker) + clientSlotPad
+	if slotEnd > len(raw) {
+		return nil, fmt.Errorf("地址槽越界")
+	}
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	region := make([]byte, slotEnd-slotStart)
+	copy(region, []byte(origin)) // 其余保持 \x00
+	copy(out[slotStart:slotEnd], region)
+	return out, nil
+}
+
+func (h *AdminHandler) handleClientDownload(w http.ResponseWriter, r *http.Request) {
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	origin := scheme + "://" + r.Host
+	blob, err := patchClientBinary(origin)
+	if err != nil {
+		writeErr(w, 404, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="autoclaw-client-windows-amd64.exe"`)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(blob)))
+	w.Write(blob)
 }

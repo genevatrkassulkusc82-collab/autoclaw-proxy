@@ -43,7 +43,8 @@ type Account struct {
 	TotalRequests int64  `json:"total_requests"`
 	TotalTokens   int64  `json:"total_tokens"`
 	FailedStreak  int    `json:"failed_streak"`
-	Source        string `json:"source"` // sms_login|local_import|manual
+	Source        string `json:"source"` // sms_login|local_import|manual|client_import
+	Region        string `json:"region"` // cn|oversea —— 决定上游 host 与 X-Lang（默认 cn）
 	CreatedAt     int64  `json:"created_at"`
 	UpdatedAt     int64  `json:"updated_at"`
 }
@@ -118,6 +119,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   total_tokens INTEGER NOT NULL DEFAULT 0,
   failed_streak INTEGER NOT NULL DEFAULT 0,
   source TEXT NOT NULL DEFAULT 'manual',
+  region TEXT NOT NULL DEFAULT 'cn',
   created_at INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL DEFAULT 0,
   UNIQUE(user_id, device_id)
@@ -174,7 +176,32 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix);
 `
 	_, err := d.conn.Exec(ddl)
-	return err
+	if err != nil {
+		return err
+	}
+	// 老库补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表加新列
+	d.ensureColumn("accounts", "region", "TEXT NOT NULL DEFAULT 'cn'")
+	return nil
+}
+
+// ensureColumn 若表缺少某列则 ALTER TABLE 补上（幂等，用于平滑升级老库）
+func (d *DB) ensureColumn(table, column, decl string) {
+	rows, err := d.conn.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk) == nil && name == column {
+			return // 已存在
+		}
+	}
+	if _, err := d.conn.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl)); err != nil {
+		fmt.Printf("[db] ensureColumn %s.%s 失败: %v\n", table, column, err)
+	}
 }
 
 // ---------------- settings ----------------
@@ -209,12 +236,12 @@ func (d *DB) UpsertAccount(a *Account) (int64, error) {
 	if err == sql.ErrNoRows {
 		a.CreatedAt = now
 		res, ierr := d.conn.Exec(`INSERT INTO accounts
-(user_id,phone,access_token,refresh_token,device_id,public_key_pem,private_key_pem,device_spoofed,
- account_group,status,enabled,at_exp,rt_exp,source,created_at,updated_at)
- VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	(user_id,phone,access_token,refresh_token,device_id,public_key_pem,private_key_pem,device_spoofed,
+	 account_group,status,enabled,at_exp,rt_exp,source,region,created_at,updated_at)
+	 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			a.UserID, a.Phone, a.AccessToken, a.RefreshToken, a.DeviceID, a.PublicKeyPem, a.PrivateKeyPem,
 			a.DeviceSpoofed, a.AccountGroup, orDefault(a.Status, "active"), orDefaultInt(a.Enabled, 1),
-			a.AtExp, a.RtExp, orDefault(a.Source, "manual"), now, now)
+			a.AtExp, a.RtExp, orDefault(a.Source, "manual"), string(accountRegion(a)), now, now)
 		if ierr != nil {
 			return 0, ierr
 		}
@@ -224,12 +251,14 @@ func (d *DB) UpsertAccount(a *Account) (int64, error) {
 		return 0, err
 	}
 	_, err = d.conn.Exec(`UPDATE accounts SET
-  phone=?, access_token=?, refresh_token=?, public_key_pem=?, private_key_pem=?, device_spoofed=?,
-  account_group=?, at_exp=?, rt_exp=?, source=?, updated_at=?,
-  status=CASE WHEN status IN ('needs_login','refreshing') THEN 'active' ELSE status END
- WHERE id=?`,
+	  phone=?, access_token=?, refresh_token=?, public_key_pem=?, private_key_pem=?, device_spoofed=?,
+	  account_group=?, at_exp=?, rt_exp=?, source=?,
+	  region=CASE WHEN ?='' THEN region ELSE ? END, updated_at=?,
+	  status=CASE WHEN status IN ('needs_login','refreshing') THEN 'active' ELSE status END
+	 WHERE id=?`,
 		a.Phone, a.AccessToken, a.RefreshToken, a.PublicKeyPem, a.PrivateKeyPem, a.DeviceSpoofed,
-		a.AccountGroup, a.AtExp, a.RtExp, orDefault(a.Source, a.Source), now, id)
+		a.AccountGroup, a.AtExp, a.RtExp, orDefault(a.Source, a.Source),
+		a.Region, string(NormalizeRegion(a.Region)), now, id)
 	return id, err
 }
 

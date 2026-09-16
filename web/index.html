@@ -93,6 +93,11 @@
 <!-- ===== 账号管理 ===== -->
 <div class="section" id="section-accounts">
   <div class="toolbar">
+    <div class="seg-toggle" id="region-filter">
+      <div class="seg active" data-r="" onclick="setRegionFilter('')">全部</div>
+      <div class="seg" data-r="cn" onclick="setRegionFilter('cn')">国内</div>
+      <div class="seg" data-r="oversea" onclick="setRegionFilter('oversea')">海外</div>
+    </div>
     <button class="btn btn-primary" onclick="importLocal()">📥 导入本机登录态（推荐）</button>
     <button class="btn btn-secondary" onclick="openSmsModal()">📱 验证码登录</button>
     <button class="btn btn-secondary" onclick="loadAccounts()">刷新</button>
@@ -109,7 +114,7 @@
   <div class="card">
     <div class="card-header"><h2>账号列表</h2></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>ID</th><th>用户</th><th>设备</th><th>分组</th><th>区域</th><th>状态</th><th>AT 剩余</th><th>RT 剩余</th><th>请求 · Tokens</th><th>额度/会员</th><th>操作</th></tr></thead>
+      <thead><tr><th>ID</th><th>用户</th><th>设备</th><th>区域</th><th>分组</th><th>区域</th><th>状态</th><th>AT 剩余</th><th>RT 剩余</th><th>请求 · Tokens</th><th>额度/会员</th><th>操作</th></tr></thead>
       <tbody id="acct-tbody"></tbody>
     </table></div>
   </div>

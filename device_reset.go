@@ -52,11 +52,11 @@ func autoClawRunning() bool {
 }
 
 // ResetLocalDeviceIdentity 重新生成本机设备身份并移走旧登录态
-func ResetLocalDeviceIdentity(dataDir string) (*DeviceResetReport, error) {
+func ResetLocalDeviceIdentity(dataDir, region string, db *DB) (*DeviceResetReport, error) {
 	if autoClawRunning() {
 		return nil, fmt.Errorf("官方 AutoClaw 正在运行，请先完全退出（托盘也退出）后再重置设备身份")
 	}
-	paths, err := DetectLocalAutoClaw()
+	paths, err := DetectLocalAutoClawFor(NormalizeRegion(region), db)
 	if err != nil {
 		return nil, fmt.Errorf("未检测到 AutoClaw 本地数据: %w", err)
 	}

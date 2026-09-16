@@ -98,26 +98,47 @@ func main() {
 	fmt.Println("✓ 配对成功")
 
 	for {
-		switch *flagMode {
-		case "import":
-			if err := doImport(server, code, *flagGroup); err != nil {
-				fmt.Printf("导入失败: %v\n", err)
-				os.Exit(1)
-			}
+		fmt.Println("")
+		fmt.Println("== 请选择操作 ==")
+		fmt.Println("  [1] 导入本机已登录账号（真实设备）")
+		fmt.Println("  [2] 导入本机已登录账号（更换新设备身份）")
+		fmt.Println("  [3] 重置本机设备+清除登录态，等手动登录后导入")
+		fmt.Println("  [4] 退出")
+		fmt.Print("选择 [1-4]: ")
+		choice := strings.TrimSpace(readLine(reader))
+		if choice == "4" {
 			return
-		case "reset":
-			if err := doResetThenImport(server, code, *flagGroup); err != nil {
-				fmt.Printf("重置导入失败: %v\n", err)
-				os.Exit(1)
+		}
+		region := askRegion(reader)
+		group := askGroup(reader)
+		switch choice {
+		case "1":
+			if err := doImport(server, code, group, region, false); err != nil {
+				fmt.Println(fmt.Sprintf("导入失败: %v", err))
+			} else {
+				fmt.Println("✓ 导入成功（真实设备）")
+			}
+		case "2":
+			if err := doImport(server, code, group, region, true); err != nil {
+				fmt.Println(fmt.Sprintf("导入失败: %v", err))
+			} else {
+				fmt.Println("✓ 导入成功（新设备身份）")
+			}
+		case "3":
+			if err := doResetThenImport(server, code, group, region); err != nil {
+				fmt.Println(fmt.Sprintf("重置导入失败: %v", err))
+			} else {
+				fmt.Println("✓ 重置导入成功")
 			}
 		default:
-			fmt.Println("未知 mode:", *flagMode)
-			os.Exit(1)
+			fmt.Println("无效选择")
+			continue
 		}
-		if !*flagLoop {
+		fmt.Println("")
+		fmt.Print("继续导入下一个账号? [y/N]: ")
+		if !strings.EqualFold(strings.TrimSpace(readLine(reader)), "y") {
 			return
 		}
-		fmt.Println("\n[loop] 已导入一个账号；请在官方 AutoClaw 登录下一个账号，客户端将继续轮询…")
 	}
 }
 
@@ -150,13 +171,44 @@ type localAccount struct {
 	DeviceSpoofed int    `json:"device_spoofed"`
 }
 
-func appDataDir() string {
-	return filepath.Join(os.Getenv("APPDATA"), "AutoClaw")
+// appDataDirFor 按区域返回官方客户端 userData 目录（国内 AutoClaw / 国际 autoclaw 等候选）
+func appDataDirFor(region string) string {
+	appdata := os.Getenv("APPDATA")
+	var names []string
+	if strings.EqualFold(region, "oversea") {
+		names = []string{"autoclaw", "AutoClaw-Oversea", "AutoClaw-Global", "AutoClaw"}
+	} else {
+		names = []string{"AutoClaw", "autoclaw"}
+	}
+	for _, n := range names {
+		p := filepath.Join(appdata, n)
+		if _, err := os.Stat(filepath.Join(p, "auth.json")); err == nil {
+			return p
+		}
+	}
+	return filepath.Join(appdata, names[0])
 }
 
-// readLocalAccount 读取并解密本机 AutoClaw 登录态；无 token 返回 error
-func readLocalAccount() (*localAccount, error) {
-	dir := appDataDir()
+func openclawHomeFor(region string) string {
+	home := os.Getenv("USERPROFILE")
+	var names []string
+	if strings.EqualFold(region, "oversea") {
+		names = []string{".eclaw", ".openclaw-autoclaw-oversea", ".openclaw-autoclaw"}
+	} else {
+		names = []string{".openclaw-autoclaw", ".eclaw"}
+	}
+	for _, n := range names {
+		p := filepath.Join(home, n)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return filepath.Join(home, names[0])
+}
+
+// readLocalAccount 读取并解密本机 AutoClaw 登录态；spoof=true 时更换为新设备身份
+func readLocalAccount(spoof bool, region string) (*localAccount, error) {
+	dir := appDataDirFor(region)
 	authRaw, err := os.ReadFile(filepath.Join(dir, "auth.json"))
 	if err != nil {
 		return nil, fmt.Errorf("读取 auth.json 失败（本机未安装/未登录 AutoClaw?）: %w", err)
@@ -196,7 +248,18 @@ func readLocalAccount() (*localAccount, error) {
 		DeviceID:      auth.DeviceID,
 		DeviceSpoofed: 0,
 	}
-	// 设备身份（可缺省）
+	// 设备身份：spoof 时生成新设备（更换设备信息），否则读本机真实设备
+	if spoof {
+		dev, gerr := generateDeviceIdentity()
+		if gerr != nil {
+			return nil, fmt.Errorf("生成新设备身份失败: %w", gerr)
+		}
+		acct.DeviceID = dev.id
+		acct.PublicKeyPem = dev.pubPem
+		acct.PrivateKeyPem = dev.privPem
+		acct.DeviceSpoofed = 1
+		return acct, nil
+	}
 	if raw, err := os.ReadFile(filepath.Join(dir, "identity", "device.json")); err == nil {
 		var dev struct {
 			DeviceID      string `json:"deviceId"`
@@ -216,7 +279,7 @@ func readLocalAccount() (*localAccount, error) {
 
 // ---- 回传服务器 ----
 
-func pushAccount(server, code, group string, acct *localAccount, source string) error {
+func pushAccount(server, code, group, region string, acct *localAccount, source string) error {
 	payload := map[string]interface{}{
 		"code": code,
 		"account": map[string]interface{}{
@@ -229,6 +292,7 @@ func pushAccount(server, code, group string, acct *localAccount, source string) 
 			"private_key_pem": acct.PrivateKeyPem,
 			"device_spoofed":  acct.DeviceSpoofed,
 			"group":           group,
+			"region":          region,
 			"source":          source,
 		},
 	}
@@ -250,20 +314,20 @@ func pushAccount(server, code, group string, acct *localAccount, source string) 
 	return nil
 }
 
-func doImport(server, code, group string) error {
-	acct, err := readLocalAccount()
+func doImport(server, code, group, region string, spoof bool) error {
+	acct, err := readLocalAccount(spoof, region)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("读到本机账号 user=%s phone=%s device=%s…\n", acct.UserID, acct.Phone, short(acct.DeviceID))
-	return pushAccount(server, code, group, acct, "client_import")
+	return pushAccount(server, code, group, region, acct, "client_import")
 }
 
-func doResetThenImport(server, code, group string) error {
+func doResetThenImport(server, code, group, region string) error {
 	if autoClawRunning() {
 		return fmt.Errorf("官方 AutoClaw 正在运行，请先完全退出再执行 reset 模式")
 	}
-	if err := resetLocalDevice(); err != nil {
+	if err := resetLocalDevice(region); err != nil {
 		return err
 	}
 	fmt.Println("✓ 已重置本机设备身份并清除登录态。现在请打开官方 AutoClaw 手动登录…")
@@ -273,12 +337,12 @@ func doResetThenImport(server, code, group string) error {
 		if autoClawRunning() {
 			// 官方运行中读 auth.json 可能被占用/回写；等其退出或短暂停留后读
 		}
-		acct, err := readLocalAccount()
+		acct, err := readLocalAccount(false, region)
 		if err != nil {
 			continue
 		}
 		fmt.Printf("检测到新登录 user=%s phone=%s\n", acct.UserID, acct.Phone)
-		return pushAccount(server, code, group, acct, "client_reset_import")
+		return pushAccount(server, code, group, region, acct, "client_reset_import")
 	}
 	return fmt.Errorf("等待手动登录超时（%s）", waitTimeout)
 }
@@ -300,8 +364,8 @@ func autoClawRunning() bool {
 
 // ---- 设备重置（与网关 device_reset 等价，客户端自包含） ----
 
-func resetLocalDevice() error {
-	dir := appDataDir()
+func resetLocalDevice(region string) error {
+	dir := appDataDirFor(region)
 	identityPath := filepath.Join(dir, "identity", "device.json")
 	// 备份
 	ts := time.Now().Format("20060102-150405")
@@ -470,3 +534,22 @@ func generateDeviceIdentity() (*deviceIdentity, error) {
 }
 
 var spkiPrefix = []byte{0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00}
+
+func readLine(r *bufio.Reader) string {
+	line, _ := r.ReadString(byte(10))
+	return strings.TrimSpace(line)
+}
+
+func askRegion(r *bufio.Reader) string {
+	fmt.Print("区域 [cn=国内 / oversea=海外] (默认 cn): ")
+	v := strings.ToLower(strings.TrimSpace(readLine(r)))
+	if v == "" {
+		return "cn"
+	}
+	return v
+}
+
+func askGroup(r *bufio.Reader) string {
+	fmt.Print("分组（可选，回车跳过）: ")
+	return strings.TrimSpace(readLine(r))
+}

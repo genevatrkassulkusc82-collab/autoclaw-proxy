@@ -181,12 +181,12 @@ func (h *AdminHandler) handleClientPush(w http.ResponseWriter, r *http.Request) 
 		PrivateKeyPem: a.PrivateKeyPem,
 		DeviceSpoofed: a.DeviceSpoofed,
 		AccountGroup:  a.Group,
+		Region:        string(NormalizeRegion(a.Region)),
 		Status:        "active",
 		Enabled:       1,
 		AtExp:         TokenExpiresAt(a.AccessToken),
 		RtExp:         TokenExpiresAt(a.RefreshToken),
 		Source:        src,
-		Region:        a.Region,
 	}
 	id, err := h.db.UpsertAccount(acct)
 	if err != nil {

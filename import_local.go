@@ -26,21 +26,35 @@ type LocalAutoClawPaths struct {
 	StateDir   string // %USERPROFILE%\.openclaw-autoclaw
 }
 
-// DetectLocalAutoClaw 探测本机 AutoClaw 安装数据
+// DetectLocalAutoClaw 探测本机 AutoClaw 安装数据（默认国内）
 func DetectLocalAutoClaw() (*LocalAutoClawPaths, error) {
-	appdata := os.Getenv("APPDATA")
-	home := os.Getenv("USERPROFILE")
-	if appdata == "" || home == "" {
+	return DetectLocalAutoClawFor(DefaultRegion, nil)
+}
+
+// DetectLocalAutoClawFor 按区域探测本机 AutoClaw 数据目录（国内/海外包名/数据目录不同）
+func DetectLocalAutoClawFor(region Region, db *DB) (*LocalAutoClawPaths, error) {
+	if os.Getenv("APPDATA") == "" || os.Getenv("USERPROFILE") == "" {
 		return nil, errors.New("非 Windows 用户环境或缺少 APPDATA/USERPROFILE")
 	}
-	p := &LocalAutoClawPaths{
-		AppDataDir: filepath.Join(appdata, "AutoClaw"),
-		StateDir:   filepath.Join(home, ".openclaw-autoclaw"),
+	appDatas := RegionAppDataCandidates(region, db)
+	homes := RegionOpenclawHomeCandidates(region, db)
+	for _, ad := range appDatas {
+		if _, err := os.Stat(filepath.Join(ad, "auth.json")); err != nil {
+			continue
+		}
+		state := ""
+		for _, h := range homes {
+			if _, err := os.Stat(h); err == nil {
+				state = h
+				break
+			}
+		}
+		if state == "" && len(homes) > 0 {
+			state = homes[0]
+		}
+		return &LocalAutoClawPaths{AppDataDir: ad, StateDir: state}, nil
 	}
-	if _, err := os.Stat(filepath.Join(p.AppDataDir, "auth.json")); err != nil {
-		return nil, fmt.Errorf("未找到 AutoClaw 登录数据（%s）: %w", p.AppDataDir, err)
-	}
-	return p, nil
+	return nil, fmt.Errorf("未找到区域 %s 的 AutoClaw 登录数据（候选: %v）", region, appDatas)
 }
 
 // LocalImportPreview 导入预览（脱敏，不含 token）
@@ -111,14 +125,12 @@ func PreviewLocalImport() *LocalImportPreview {
 // ImportLocalAccount 从本机 AutoClaw 导入账号（真实设备身份，device_spoofed=0）
 // region 为空时自动从 ~/.openclaw-autoclaw/openclaw.json 的 provider baseUrl 识别（国内/海外）
 func ImportLocalAccount(db *DB, group, region string) (*Account, error) {
-	paths, err := DetectLocalAutoClaw()
+	reg := NormalizeRegion(region)
+	paths, err := DetectLocalAutoClawFor(reg, db)
 	if err != nil {
 		return nil, err
 	}
-	reg := DefaultRegion
-	if strings.TrimSpace(region) != "" {
-		reg = NormalizeRegion(region)
-	} else {
+	if strings.TrimSpace(region) == "" {
 		reg = detectRegionFromOpenclaw(paths)
 	}
 	var auth struct {

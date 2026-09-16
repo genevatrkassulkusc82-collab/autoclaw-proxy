@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"strconv"
 	"log"
 	"net/http"
 	"strings"
@@ -133,11 +134,21 @@ func (h *AdminHandler) handleListAccounts(w http.ResponseWriter, r *http.Request
 		writeErr(w, 500, err.Error())
 		return
 	}
+	if rp := r.URL.Query().Get("region"); rp != "" {
+		want := NormalizeRegion(rp)
+		filtered := accounts[:0]
+		for _, a := range accounts {
+			if accountRegion(a) == want {
+				filtered = append(filtered, a)
+			}
+		}
+		accounts = filtered
+	}
 	out := make([]map[string]interface{}, 0, len(accounts))
 	for _, a := range accounts {
 		out = append(out, accountView(a))
 	}
-	writeJSON(w, 200, map[string]interface{}{"accounts": out})
+	writeJSON(w, 200, map[string]interface{}{"accounts": out, "regions": AllRegions()})
 }
 
 func (h *AdminHandler) handleImportPreview(w http.ResponseWriter, r *http.Request) {
@@ -561,7 +572,11 @@ func (h *AdminHandler) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 // ---- 本机设备身份重置 ----
 
 func (h *AdminHandler) handleDeviceReset(w http.ResponseWriter, r *http.Request) {
-	rep, err := ResetLocalDeviceIdentity(h.dataDir)
+	var req struct {
+		Region string `json:"region"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	rep, err := ResetLocalDeviceIdentity(h.dataDir, req.Region, h.db)
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
@@ -586,4 +601,20 @@ func (h *AdminHandler) handleDeviceRestore(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"ok": true})
+}
+
+func (h *AdminHandler) handleAccountSetRegion(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	var req struct {
+		Region string `json:"region"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Region == "" {
+		writeErr(w, 400, "缺少 region")
+		return
+	}
+	if err := h.db.SetAccountRegion(id, string(NormalizeRegion(req.Region))); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"ok": true, "region": string(NormalizeRegion(req.Region))})
 }

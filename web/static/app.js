@@ -214,11 +214,17 @@ curl ${location.origin}/v1/chat/completions \\
 // ---- 账号管理 ----
 
 let quotaMap = {};
+let regionFilter = "";
+function setRegionFilter(r) {
+  regionFilter = r;
+  document.querySelectorAll("#region-filter .seg").forEach(s => s.classList.toggle("active", s.dataset.r === r));
+  loadAccounts();
+}
 
 async function loadAccounts() {
   try {
     const [r, q] = await Promise.all([
-      api('/admin/accounts'),
+      api('/admin/accounts' + (regionFilter ? '?region=' + regionFilter : '')),
       api('/admin/accounts/quota-all').catch(() => ({ quotas: [] })),
     ]);
     quotaMap = {};
@@ -240,6 +246,7 @@ async function loadAccounts() {
       <td><div class="mono">${a.user_id || '-'}</div><div class="dim mono">${a.phone || ''}</div></td>
       <td>${a.device_spoofed ? '<span class="badge badge-warning">伪造</span>' : '<span class="badge badge-muted">真实(导入)</span>'}
           <div class="dev-id">${esc((a.device_id || '').slice(0, 10))}…</div></td>
+      <td>${a.region === 'oversea' ? '<span class="badge badge-info">海外</span>' : '<span class="badge badge-success">国内</span>'}</td>
       <td>${esc(a.group) || '-'}</td>
       <td>${regionBadge(a.region, a.id)}</td>
       <td>${statusBadge(a.status)}${a.last_error ? `<div class="dim mono" title="${esc(a.last_error)}">${esc(a.last_error.slice(0, 24))}</div>` : ''}</td>
@@ -248,6 +255,7 @@ async function loadAccounts() {
       <td>${a.total_requests} / ${fmtNum(a.total_tokens)}</td>
       <td>${quotaCell}</td>
       <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-secondary" onclick="switchRegion(${a.id}, '${a.region === 'oversea' ? 'cn' : 'oversea'}')">转${a.region === 'oversea' ? '国内' : '海外'}</button>
         <button class="btn btn-sm btn-secondary" onclick="showUsage(${a.id})">用量</button>
         <button class="btn btn-sm btn-secondary" onclick="showQuota(${a.id})">积分</button>
         <button class="btn btn-sm btn-secondary" onclick="refreshAcct(${a.id}, this)">刷新</button>
@@ -255,7 +263,7 @@ async function loadAccounts() {
         <button class="btn btn-sm btn-danger" onclick="delAcct(${a.id})">删除</button>
       </td></tr>`;
     }).join('')
-      || '<tr><td colspan="11"><div class="empty"><div class="icon">🪪</div><p>暂无账号 —— 「导入本机登录态」或「验证码登录」</p></div></td></tr>';
+      || '<tr><td colspan="12"><div class="empty"><div class="icon">🪪</div><p>暂无账号 —— 「导入本机登录态」或「验证码登录」</p></div></td></tr>';
   } catch (e) {}
 }
 
@@ -319,7 +327,7 @@ async function showQuota(id) {
 
 async function importLocal() {
   try {
-    const r = await api('/admin/accounts/import-local', { method: 'POST', body: { group: '' } });
+    const r = await api('/admin/accounts/import-local', { method: 'POST', body: { group: '', region: regionFilter || 'cn' } });
     toast('导入成功: account=' + r.account.id);
     loadAccounts(); loadStats();
   } catch (e) { toast('导入失败: ' + e.message, 'error'); }
@@ -690,7 +698,7 @@ async function resetDevice() {
 继续？`;
   if (!confirm(msg)) return;
   try {
-    const r = await api('/admin/device/reset', { method: 'POST' });
+    const r = await api('/admin/device/reset', { method: 'POST', body: { region: regionFilter || 'cn' } });
     toast('设备身份已重置：' + (r.new_device_id || '').slice(0, 12) + '…');
     const done = `重置完成。
 旧 deviceId: ${r.old_device_id || '(无)'}
@@ -726,5 +734,13 @@ async function issuePairCode() {
     const r = await api('/admin/client/code', { method: 'POST' });
     $('#pair-code').textContent = r.code;
     $('#pair-ttl').textContent = '有效期 ' + Math.round(r.ttl_seconds / 60) + ' 分钟';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function switchRegion(id, region) {
+  try {
+    await api('/admin/accounts/' + id + '/region', { method: 'POST', body: { region } });
+    toast('已切换为 ' + (region === 'oversea' ? '海外' : '国内'));
+    loadAccounts();
   } catch (e) { toast(e.message, 'error'); }
 }

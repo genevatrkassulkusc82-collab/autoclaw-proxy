@@ -6,7 +6,11 @@ package main
 // ② X-Lang（zh-CN ↔ en）③ 登录方式（短信 ↔ Google/Z.ai OAuth，本网关靠导入故不区分）。
 // 因此把全部差异集中到下面这张表：新增区域 = 加一行；其余代码只问 RegionHost/RegionLang，零分支。
 
-import "strings"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+)
 
 // Region 账号所属发行区域
 type Region string
@@ -96,4 +100,42 @@ func DetectRegionFromHost(host string) Region {
 		return RegionOversea
 	}
 	return RegionCN
+}
+
+// ---- 本地区域数据目录 ----
+// 国内/海外是编译期 isOversea 的两个构建，Electron userData 与 openclaw home 目录名不同。
+// 海外构建目录名无法从国内包确证，故用候选列表探测 + settings 覆盖（oversea_appdata / oversea_openclaw_home）。
+func RegionAppDataCandidates(r Region, db *DB) []string {
+	appdata := os.Getenv("APPDATA")
+	if r == RegionOversea {
+		names := []string{"autoclaw", "AutoClaw-Oversea", "AutoClaw-Global", "AutoClaw"}
+		if v, _ := db.GetSetting("oversea_appdata"); v != "" {
+			names = append([]string{v}, names...)
+		}
+		out := []string{}
+		for _, n := range names {
+			out = append(out, filepath.Join(appdata, n))
+		}
+		return out
+	}
+	return []string{filepath.Join(appdata, "AutoClaw")}
+}
+
+func RegionOpenclawHomeCandidates(r Region, db *DB) []string {
+	home := os.Getenv("USERPROFILE")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if r == RegionOversea {
+		names := []string{".eclaw", ".openclaw-autoclaw-oversea", ".openclaw-autoclaw-global", ".openclaw-autoclaw"}
+		if v, _ := db.GetSetting("oversea_openclaw_home"); v != "" {
+			names = append([]string{v}, names...)
+		}
+		out := []string{}
+		for _, n := range names {
+			out = append(out, filepath.Join(home, n))
+		}
+		return out
+	}
+	return []string{filepath.Join(home, ".openclaw-autoclaw")}
 }

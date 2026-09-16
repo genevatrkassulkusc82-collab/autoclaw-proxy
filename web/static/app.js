@@ -613,6 +613,7 @@ async function resetDevice() {
     alert('重置完成。
 旧 deviceId: ' + (r.old_device_id || '(无)') + '
 新 deviceId: ' + r.new_device_id + '
+已清除登录态: ' + ((r.cleared||[]).join(', ') || '(无)') + '
 备份: ' + r.backupDir + '
 
 现在打开官方 AutoClaw 手动登录（将以新设备绑定），登录后回本页「导入本机登录态」。');

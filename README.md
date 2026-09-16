@@ -18,7 +18,7 @@
 | 自持 rt 刷新 at | `/userapi/v1/refresh`（MD5 签名）+ 400002 降级 `agent-refresh`；rt 轮换即持久化 | ✅ 协议已验证 |
 | 模型同步 | 上游 `autoclaw-model-config` 同步（`?sync=1` 强制）；路由 ID + 短名双暴露；内置兜底目录 | ✅ 实测 |
 | 本地账号导入 | 解密 `%APPDATA%\AutoClaw\auth.json` 的 `enc:v10`（DPAPI → AES-256-GCM）+ 真实设备身份，一键入库 | ✅ 实测（推荐） |
-| 本机设备身份重置 | 重新生成官方 AutoClaw 的 `identity/device.json`（Ed25519+deviceId）并移走旧 `auth.json`（自动备份/可恢复），使官方客户端以**新设备**弹登录页供手动登录；用于设备级风控拉黑后换设备 | ✅ |
+| 本机设备身份重置 | 重新生成官方 AutoClaw 的 `identity/device.json`（Ed25519+deviceId），并**清除全部登录态**（`auth.json*` + Chromium `Network`/`Local Storage`/`Session Storage`/`WebStorage`），自动备份/可恢复；使官方客户端以**新设备+未登录**弹登录页供手动登录；用于设备级风控拉黑后换设备 | ✅ |
 | 验证码登录 | 管理 UI 填手机号 → 真实 Chrome 浏览器桥发码/登录 → 入库 | ⚠️ 见[登录限制](#账号获取与登录限制) |
 | 设备身份 | Ed25519 密钥对；`deviceId = SHA-256(公钥原始32字节)hex`，与官方算法逐位一致 | ✅ 实测 |
 | TLS 指纹 | utls：Chrome/Firefox/Safari/Edge/随机化等预置 + 自定义 JA3；utls-over-HTTP/2 | ✅ |

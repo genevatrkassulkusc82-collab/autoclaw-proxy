@@ -21,11 +21,25 @@ import (
 
 // DeviceResetReport 重置结果
 type DeviceResetReport struct {
-	OldDeviceID string `json:"old_device_id"`
-	NewDeviceID string `json:"new_device_id"`
-	BackupDir   string `json:"backup_dir"`
-	AuthMoved   bool   `json:"auth_moved"`
-	IdentityRW  bool   `json:"identity_rewritten"`
+	OldDeviceID string   `json:"old_device_id"`
+	NewDeviceID string   `json:"new_device_id"`
+	BackupDir   string   `json:"backup_dir"`
+	AuthMoved   bool     `json:"auth_moved"`
+	IdentityRW  bool     `json:"identity_rewritten"`
+	Cleared     []string `json:"cleared"` // 已清除的登录态存储
+}
+
+// loginStorePaths 官方客户端的登录态存储（清除以强制手动登录）：
+// token 文件 + Chromium 的 cookies/Local/Session/WebStorage。
+func loginStorePaths(appDataDir string) []string {
+	return []string{
+		"auth.json",
+		"auth.json.backup",
+		"Network",          // Chromium cookies（含会话/acw_tc）
+		"Local Storage",    // localStorage 会话
+		"Session Storage",  // sessionStorage
+		"WebStorage",       // 其它 web 存储
+	}
 }
 
 // autoClawRunning 检测官方 AutoClaw 进程是否在运行（Windows 用 tasklist）
@@ -47,7 +61,6 @@ func ResetLocalDeviceIdentity(dataDir string) (*DeviceResetReport, error) {
 		return nil, fmt.Errorf("未检测到 AutoClaw 本地数据: %w", err)
 	}
 	identityPath := filepath.Join(paths.AppDataDir, "identity", "device.json")
-	authPath := filepath.Join(paths.AppDataDir, "auth.json")
 
 	// 读旧 deviceId（可缺省）
 	oldID := ""
@@ -72,9 +85,26 @@ func ResetLocalDeviceIdentity(dataDir string) (*DeviceResetReport, error) {
 			return nil, fmt.Errorf("备份 device.json 失败: %w", err)
 		}
 	}
-	if _, err := os.Stat(authPath); err == nil {
-		if err := copyFile(authPath, filepath.Join(backupDir, "auth.json")); err != nil {
-			return nil, fmt.Errorf("备份 auth.json 失败: %w", err)
+	// 备份并清除全部登录态存储（token 文件 + Chromium cookies/Local/Session/WebStorage）
+	for _, rel := range loginStorePaths(paths.AppDataDir) {
+		src := filepath.Join(paths.AppDataDir, rel)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		dst := filepath.Join(backupDir, rel)
+		if fi, err := os.Stat(src); err == nil && fi.IsDir() {
+			if err := copyDir(src, dst); err != nil {
+				return nil, fmt.Errorf("备份 %s 失败: %w", rel, err)
+			}
+		} else if err := copyFile(src, dst); err != nil {
+			return nil, fmt.Errorf("备份 %s 失败: %w", rel, err)
+		}
+		if err := os.RemoveAll(src); err != nil {
+			return nil, fmt.Errorf("清除 %s 失败: %w", rel, err)
+		}
+		rep.Cleared = append(rep.Cleared, rel)
+		if rel == "auth.json" {
+			rep.AuthMoved = true
 		}
 	}
 
@@ -100,13 +130,6 @@ func ResetLocalDeviceIdentity(dataDir string) (*DeviceResetReport, error) {
 	rep.NewDeviceID = dev.DeviceID
 	rep.IdentityRW = true
 
-	// 移走旧登录态（让官方客户端弹出登录页）；已备份
-	if _, err := os.Stat(authPath); err == nil {
-		if err := os.Remove(authPath); err != nil {
-			return nil, fmt.Errorf("移除旧 auth.json 失败: %w", err)
-		}
-		rep.AuthMoved = true
-	}
 	return rep, nil
 }
 
@@ -123,7 +146,6 @@ func RestoreLocalDeviceIdentity(dataDir, backupName string) error {
 	}
 	src := filepath.Join(dataDir, "device-reset-backups", backupName)
 	identityPath := filepath.Join(paths.AppDataDir, "identity", "device.json")
-	authPath := filepath.Join(paths.AppDataDir, "auth.json")
 	if _, err := os.Stat(filepath.Join(src, "device.json")); err == nil {
 		if err := os.MkdirAll(filepath.Dir(identityPath), 0o755); err != nil {
 			return err
@@ -132,8 +154,18 @@ func RestoreLocalDeviceIdentity(dataDir, backupName string) error {
 			return err
 		}
 	}
-	if _, err := os.Stat(filepath.Join(src, "auth.json")); err == nil {
-		if err := copyFile(filepath.Join(src, "auth.json"), authPath); err != nil {
+	for _, rel := range loginStorePaths(paths.AppDataDir) {
+		b := filepath.Join(src, rel)
+		if _, err := os.Stat(b); err != nil {
+			continue
+		}
+		dst := filepath.Join(paths.AppDataDir, rel)
+		if fi, err := os.Stat(b); err == nil && fi.IsDir() {
+			os.RemoveAll(dst)
+			if err := copyDir(b, dst); err != nil {
+				return err
+			}
+		} else if err := copyFile(b, dst); err != nil {
 			return err
 		}
 	}
@@ -154,6 +186,20 @@ func ListDeviceBackups(dataDir string) []string {
 		}
 	}
 	return out
+}
+
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		target := filepath.Join(dst, rel)
+		if fi.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		return copyFile(p, target)
+	})
 }
 
 func copyFile(src, dst string) error {

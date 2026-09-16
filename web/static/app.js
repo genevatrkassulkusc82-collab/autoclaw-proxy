@@ -681,7 +681,7 @@ async function loadSettings() {
   try {
     const s = await api('/admin/settings');
     ['upstream_host', 'upstream_proxy', 'pool_strategy', 'tls_ja3', 'captcha_prefix',
-     'captcha_region', 'captcha_scene_id', 'captcha_page_url', 'listen_addr', 'login_proxy'].forEach(k => {
+     'captcha_region', 'captcha_scene_id', 'captcha_page_url', 'listen_addr', 'login_proxy', 'model_name_overrides'].forEach(k => {
       const el = $('#st-' + k);
       if (el) el.value = s[k] || '';
     });
@@ -694,7 +694,7 @@ async function loadSettings() {
 async function saveSettings() {
   const body = {};
   ['upstream_host', 'upstream_proxy', 'pool_strategy', 'tls_ja3', 'captcha_enabled',
-   'captcha_prefix', 'captcha_region', 'captcha_scene_id', 'captcha_page_url', 'listen_addr', 'login_proxy'].forEach(k => {
+   'captcha_prefix', 'captcha_region', 'captcha_scene_id', 'captcha_page_url', 'listen_addr', 'login_proxy', 'model_name_overrides'].forEach(k => {
     body[k] = ($('#st-' + k).value || '').trim();
   });
   body.tls_mode = $('#st-tls_mode').value;

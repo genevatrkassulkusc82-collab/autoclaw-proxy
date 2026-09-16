@@ -402,7 +402,7 @@ func (h *AdminHandler) handleDetectProxy(w http.ResponseWriter, r *http.Request)
 var editableSettings = []string{
 	"upstream_host", "upstream_proxy", "pool_strategy", "tls_mode", "tls_ja3",
 	"captcha_enabled", "captcha_prefix", "captcha_region", "captcha_scene_id", "captcha_page_url",
-	"listen_addr", "login_proxy",
+	"listen_addr", "login_proxy", "model_name_overrides",
 }
 
 func (h *AdminHandler) handleGetSettings(w http.ResponseWriter, r *http.Request) {

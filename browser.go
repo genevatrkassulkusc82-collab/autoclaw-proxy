@@ -171,7 +171,8 @@ type CaptchaConfig struct {
 	PageURL string `json:"page_url"` // 求解所用同源页面
 }
 
-// captchaHTML 阿里云无痕验证注入页（zcode-proxy 同款）
+// captchaHTML 阿里云验证码注入页（与官方海外 renderer 集成一致：popup 模式 + captchaVerifyCallback）
+// 注意：验证结果通过 captchaVerifyCallback(captchaVerifyParam) 回调（不是 success），需返回 {captchaResult,bizResult}。
 func captchaHTML(sceneID, region, prefix string) string {
 	js := func(v string) string {
 		b, _ := json.Marshal(v)
@@ -185,12 +186,16 @@ window.initAliyunCaptcha({
   SceneId: ` + js(sceneID) + `, mode: 'popup', region: ` + js(region) + `, prefix: ` + js(prefix) + `,
   element: '#cap', button: '#btn', captchaLogoImg: '', showErrorTip: false,
   getInstance: function (inst) {
-    var fn = inst.startTracelessVerification || inst.show;
-    try { fn.call(inst); } catch (e) {
+    var fn = inst.show || inst.startTracelessVerification;
+    try { fn && fn.call(inst); } catch (e) {
       window.__onCaptcha(JSON.stringify({event: 'starterr', message: String(e && e.message || e)}));
     }
   },
-  success: function (param) { window.__onCaptcha(JSON.stringify({event: 'success', param: param})); },
+  captchaVerifyCallback: function (param) {
+    window.__onCaptcha(JSON.stringify({event: 'success', param: param}));
+    return { captchaResult: true, bizResult: true };
+  },
+  onBizResultCallback: function () {},
   fail: function (m) { window.__onCaptcha(JSON.stringify({event: 'fail', reason: m})); },
   onError: function (m) { window.__onCaptcha(JSON.stringify({event: 'error', reason: m})); }
 });

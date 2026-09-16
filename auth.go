@@ -508,6 +508,21 @@ func (am *AuthManager) ToggleAPIKey(id string, enabled bool) error {
 
 // ValidateAPIKey 校验明文 Key：前缀查候选 → sha256 常量时间比较 → 启停/过期/配额
 func (am *AuthManager) ValidateAPIKey(plain string) (*APIKey, error) {
+	cands := []string{plain}
+	if strings.HasPrefix(plain, "sk-") {
+		cands = append(cands, plain[3:])
+	} else {
+		cands = append(cands, "sk-"+plain)
+	}
+	for _, c := range cands {
+		if k, err := am.validateKeyExact(c); err == nil {
+			return k, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid api key")
+}
+
+func (am *AuthManager) validateKeyExact(plain string) (*APIKey, error) {
 	if !strings.HasPrefix(plain, "sk-") {
 		return nil, fmt.Errorf("invalid api key")
 	}

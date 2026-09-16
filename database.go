@@ -553,3 +553,14 @@ func (d *DB) ModelToggleState() map[string]map[string]bool {
 	}
 	return out
 }
+
+// ModelNameOverrides 显示名覆盖（settings.model_name_overrides，JSON map[id]name）
+func (d *DB) ModelNameOverrides() map[string]string {
+	out := map[string]string{}
+	raw, _ := d.GetSetting("model_name_overrides")
+	if raw == "" {
+		return out
+	}
+	_ = json.Unmarshal([]byte(raw), &out)
+	return out
+}

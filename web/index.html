@@ -227,6 +227,8 @@
           <input class="form-input" id="st-tls_ja3" placeholder="771,4865-4866-…,0-23-…,29-23-24,0"></div>
         <div class="form-group"><label class="form-label">监听地址（重启生效）</label>
           <input class="form-input" id="st-listen_addr" placeholder="127.0.0.1:8317"></div>
+      <div class="form-group" style="flex-basis:100%"><label class="form-label">模型显示名覆盖（JSON: {"模型id":"显示名"}，纠正上游目录错误命名）</label>
+          <textarea class="form-input" id="st-model_name_overrides" rows="3" placeholder='{"tdpsk_deepseek-v4-flash-202605":"DeepSeek-V4-Flash"}'></textarea></div>
         <div class="form-group"><label class="form-label">登录桥出口代理（换干净 IP 规避风控黑名单）</label>
           <input class="form-input" id="st-login_proxy" placeholder="socks5://host:port 或 http://host:port，留空=本机 IP"></div>
       </div>

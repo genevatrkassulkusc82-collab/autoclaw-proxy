@@ -103,36 +103,51 @@ func main() {
 		fmt.Println("  [1] 导入本机已登录账号（真实设备）")
 		fmt.Println("  [2] 导入本机已登录账号（更换新设备身份）")
 		fmt.Println("  [3] 重置本机设备+清除登录态，等手动登录后导入")
-		fmt.Println("  [4] 退出")
-		fmt.Print("选择 [1-4]: ")
+		fmt.Println("  [4] 海外账号 OAuth 登录（Z.ai/Google，浏览器操作 + 本地 18432 回调）")
+		fmt.Println("  [5] 退出")
+		fmt.Print("选择 [1-5]: ")
 		choice := strings.TrimSpace(readLine(reader))
-		if choice == "4" {
+		if choice == "5" {
 			return
 		}
-		region := askRegion(reader)
-		group := askGroup(reader)
-		switch choice {
-		case "1":
-			if err := doImport(server, code, group, region, false); err != nil {
-				fmt.Println(fmt.Sprintf("导入失败: %v", err))
-			} else {
-				fmt.Println("✓ 导入成功（真实设备）")
+		if choice == "4" {
+			fmt.Print("登录方式 [zai / google] (默认 zai): ")
+			vendor := strings.ToLower(strings.TrimSpace(readLine(reader)))
+			if vendor == "" {
+				vendor = "zai"
 			}
-		case "2":
-			if err := doImport(server, code, group, region, true); err != nil {
-				fmt.Println(fmt.Sprintf("导入失败: %v", err))
+			group := askGroup(reader)
+			if err := doOverseaOAuth(server, code, group, vendor); err != nil {
+				fmt.Println(fmt.Sprintf("海外 OAuth 登录失败: %v", err))
 			} else {
-				fmt.Println("✓ 导入成功（新设备身份）")
+				fmt.Println("✓ 海外 OAuth 登录并导入成功")
 			}
-		case "3":
-			if err := doResetThenImport(server, code, group, region); err != nil {
-				fmt.Println(fmt.Sprintf("重置导入失败: %v", err))
-			} else {
-				fmt.Println("✓ 重置导入成功")
+		} else {
+			region := askRegion(reader)
+			group := askGroup(reader)
+			switch choice {
+			case "1":
+				if err := doImport(server, code, group, region, false); err != nil {
+					fmt.Println(fmt.Sprintf("导入失败: %v", err))
+				} else {
+					fmt.Println("✓ 导入成功（真实设备）")
+				}
+			case "2":
+				if err := doImport(server, code, group, region, true); err != nil {
+					fmt.Println(fmt.Sprintf("导入失败: %v", err))
+				} else {
+					fmt.Println("✓ 导入成功（新设备身份）")
+				}
+			case "3":
+				if err := doResetThenImport(server, code, group, region); err != nil {
+					fmt.Println(fmt.Sprintf("重置导入失败: %v", err))
+				} else {
+					fmt.Println("✓ 重置导入成功")
+				}
+			default:
+				fmt.Println("无效选择")
+				continue
 			}
-		default:
-			fmt.Println("无效选择")
-			continue
 		}
 		fmt.Println("")
 		fmt.Print("继续导入下一个账号? [y/N]: ")

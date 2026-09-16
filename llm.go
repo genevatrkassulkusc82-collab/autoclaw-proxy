@@ -393,12 +393,17 @@ func (c *LLMCaller) Catalog(region Region) []RemoteModel {
 	if len(models) == 0 && region == DefaultRegion {
 		models = builtinCatalog()
 	}
-	// 过滤该区域被禁用的模型
+	// 过滤该区域被禁用的模型 + 应用显示名覆盖
+	overrides := c.db.ModelNameOverrides()
 	out := models[:0]
 	for _, m := range models {
-		if !c.db.IsModelDisabled(region, m.ID) {
-			out = append(out, m)
+		if c.db.IsModelDisabled(region, m.ID) {
+			continue
 		}
+		if n, ok := overrides[m.ID]; ok && n != "" {
+			m.Name = n
+		}
+		out = append(out, m)
 	}
 	return out
 }
@@ -429,7 +434,11 @@ func (c *LLMCaller) CatalogWithState() []ModelWithState {
 		if len(models) == 0 && rg == DefaultRegion {
 			models = builtinCatalog()
 		}
+		overrides := c.db.ModelNameOverrides()
 		for _, m := range models {
+			if n, ok := overrides[m.ID]; ok && n != "" {
+				m.Name = n
+			}
 			if _, ok := byID[m.ID]; !ok {
 				byID[m.ID] = &ModelWithState{RemoteModel: m}
 				order = append(order, m.ID)

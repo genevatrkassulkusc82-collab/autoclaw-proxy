@@ -63,6 +63,11 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/browser/status", a(h.handleBrowserStatus))
 	mux.HandleFunc("POST /admin/browser/fingerprint-check", a(h.handleBrowserCheck))
 	mux.HandleFunc("POST /admin/test/chat", a(h.handleTestChat))
+	// 客户端远程导入（配对码）
+	mux.HandleFunc("POST /admin/client/code", a(h.handleClientCodeIssue))
+	mux.HandleFunc("GET /admin/client/code", a(h.handleClientCodeCurrent))
+	mux.HandleFunc("POST /client/hello", handleClientHello)
+	mux.HandleFunc("POST /client/push", h.handleClientPush)
 	// 本机设备身份重置（供官方手动登录新设备）
 	mux.HandleFunc("POST /admin/device/reset", a(h.handleDeviceReset))
 	mux.HandleFunc("GET /admin/device/backups", a(h.handleDeviceBackups))

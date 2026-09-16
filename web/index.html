@@ -97,6 +97,7 @@
     <button class="btn btn-secondary" onclick="openSmsModal()">📱 验证码登录</button>
     <button class="btn btn-secondary" onclick="loadAccounts()">刷新</button>
     <button class="btn btn-secondary" onclick="resetDevice()">🔄 重置本机设备身份</button>
+    <button class="btn btn-secondary" onclick="showPairModal()">🖥 客户端配对码</button>
     <button class="btn btn-secondary" onclick="restoreDevice()">♻️ 恢复设备备份</button>
     <span class="toolbar-title" id="accCount"></span>
     <span class="hint-block" id="import-preview"></span>
@@ -362,6 +363,23 @@
   </div>
 </div>
 
+<!-- 客户端配对码弹窗 -->
+<div class="modal-overlay" id="pairModal">
+  <div class="modal">
+    <h3>🖥 客户端远程导入（配对码）</h3>
+    <div class="hint-block">在装有 AutoClaw 的 Windows 电脑运行 <span class="mono">autoclaw-client-windows-amd64.exe</span>，输入服务器地址与下方配对码（10 分钟有效）：</div>
+    <div class="key-once" style="text-align:center"><div class="k" id="pair-code" style="font-size:26px;letter-spacing:6px">------</div></div>
+    <div class="hint-block" id="pair-ttl"></div>
+    <pre class="out"># 读本机已登录态导入
+autoclaw-client-windows-amd64.exe -server http://&lt;本服务器&gt;:8317 -code &lt;配对码&gt; -mode import
+# 重置设备+等手动登录后导入（设备拉黑自救）
+autoclaw-client-windows-amd64.exe -server http://&lt;本服务器&gt;:8317 -code &lt;配对码&gt; -mode reset -loop</pre>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="issuePairCode()">重新生成</button>
+      <button class="btn btn-primary" onclick="hideModal('pairModal')">关闭</button>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 <script src="/web/static/app.js"></script>
 </body>

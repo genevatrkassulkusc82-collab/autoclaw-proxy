@@ -630,3 +630,18 @@ async function restoreDevice() {
   if (!name) return;
   try { await api('/admin/device/restore', { method: 'POST', body: { name } }); toast('已恢复备份 ' + name); } catch (e) { toast(e.message, 'error'); }
 }
+
+// ---- 客户端配对码 ----
+
+async function showPairModal() {
+  showModal('pairModal');
+  await issuePairCode();
+}
+
+async function issuePairCode() {
+  try {
+    const r = await api('/admin/client/code', { method: 'POST' });
+    $('#pair-code').textContent = r.code;
+    $('#pair-ttl').textContent = '有效期 ' + Math.round(r.ttl_seconds / 60) + ' 分钟';
+  } catch (e) { toast(e.message, 'error'); }
+}

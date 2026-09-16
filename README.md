@@ -97,6 +97,26 @@ print(client.chat.completions.create(
 >
 > **设备级拉黑自救**：面板「🔄 重置本机设备身份」（自动备份、要求官方客户端已退出）→ 打开官方 AutoClaw 手动登录（以新设备绑定，官方风控正常执行）→ 回本网关「导入本机登录态」。可用「♻️ 恢复设备备份」撤销。
 
+## 客户端远程导入（autoclaw-client）
+
+参考 dumate-proxy 的 login-client 配对码机制。当网关部署在**无 AutoClaw 的服务器**上时，由用户在自有 Windows 电脑运行客户端回传账号：
+
+```bash
+# 构建客户端（单二进制，无 CGO）
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o clients/autoclaw-client-windows-amd64.exe ./cmd/autoclaw-client
+
+# 模式一：本地导入（本机 AutoClaw 已登录）——解密 auth.json(enc:v10) + 设备身份回传
+autoclaw-client-windows-amd64.exe -server http://<服务器>:8317 -code <配对码> -mode import
+
+# 模式二：重置设备 + 等手动登录（设备级拉黑自救）——重置本机设备身份/清登录态，
+#          轮询到官方 AutoClaw 新登录态后解密回传；-loop 连续多账号
+autoclaw-client-windows-amd64.exe -server http://<服务器>:8317 -code <配对码> -mode reset -loop
+```
+
+- 配对码：管理面「🖥 客户端配对码」生成，10 分钟有效；`POST /client/hello` 握手、`POST /client/push` 回传（均以配对码鉴权）。
+- 客户端自包含 enc:v10 解密（DPAPI→AES-256-GCM）与设备身份生成，不依赖网关代码。
+- "某些情况下用客户端本地导入"：本机已有登录态时直接 `import`；被设备拉黑时 `reset` 后手动登录再回传。
+
 ## API 参考
 
 | 端点 | 鉴权 | 说明 |

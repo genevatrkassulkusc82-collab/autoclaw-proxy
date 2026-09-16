@@ -240,14 +240,28 @@ func (c *UserAPIClient) SendCode(deviceID, phone string) (*APIEnvelope, error) {
 	}), "")
 }
 
-// LoginResult agent-login data
+// FlexID 兼容 user_id 既可能是数字(短信登录)也可能是字符串(Google/Z.ai OAuth 返回 hex 串)
+type FlexID string
+
+func (f *FlexID) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "null" {
+		s = ""
+	}
+	*f = FlexID(s)
+	return nil
+}
+
+func (f FlexID) String() string { return string(f) }
+
+// LoginResult agent-login / 海外 oauth-login 的 data
 type LoginResult struct {
-	AccessToken   string      `json:"access_token"`
-	RefreshToken  string      `json:"refresh_token"`
-	UserID        json.Number `json:"user_id"`
-	UserName      string      `json:"user_name"`
-	FirstLogin    bool        `json:"first_login"`
-	WebFirstLogin bool        `json:"web_first_login"`
+	AccessToken   string `json:"access_token"`
+	RefreshToken  string `json:"refresh_token"`
+	UserID        FlexID `json:"user_id"`
+	UserName      string `json:"user_name"`
+	FirstLogin    bool   `json:"first_login"`
+	WebFirstLogin bool   `json:"web_first_login"`
 }
 
 // Login 短信验证码登录

@@ -48,6 +48,28 @@ func embeddedServerURL() string {
 	return s
 }
 
+// embeddedVersionSlot 服务器在 /client/download 时写入的"版本槽"（值=服务端 Version）
+var embeddedVersionSlot = "<<AUTOCLAW_CLIENT_VERSION>>" + strings.Repeat(string(rune(0)), 32)
+
+// clientVersion 兜底版本（未经 /client/download 打补丁的原始构建用）
+const clientVersion = "1.0.0"
+
+func embeddedVersion() string {
+	s := strings.TrimRight(embeddedVersionSlot, string(rune(0)))
+	if s == "" || strings.Contains(s, "<<AUTOCLAW_CLIENT_VERSION") {
+		return ""
+	}
+	return s
+}
+
+// reportVersion 优先用下载时服务器盖的版本戳，否则用编译期兜底版本
+func reportVersion() string {
+	if v := embeddedVersion(); v != "" {
+		return v
+	}
+	return clientVersion
+}
+
 var (
 	flagServer = flag.String("server", "", "autoclaw-proxy 服务器地址，如 http://your-server:8317")
 	flagCode   = flag.String("code", "", "Web 管理页「客户端配对码」")
@@ -63,6 +85,7 @@ const (
 
 func main() {
 	flag.Parse()
+	fmt.Printf("autoclaw-client v%s\n", reportVersion())
 	reader := bufio.NewReader(os.Stdin)
 	server := strings.TrimRight(*flagServer, "/")
 	code := strings.ToUpper(strings.TrimSpace(*flagCode))
@@ -160,7 +183,7 @@ func main() {
 // ---- 配对 ----
 
 func hello(server, code string) error {
-	body, _ := json.Marshal(map[string]string{"code": code})
+	body, _ := json.Marshal(map[string]string{"code": code, "version": reportVersion()})
 	resp, err := http.Post(server+"/client/hello", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -169,6 +192,17 @@ func hello(server, code string) error {
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, b)
+	}
+	var out struct {
+		ServerVersion string `json:"server_version"`
+		Outdated      bool   `json:"outdated"`
+		Msg           string `json:"msg"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if out.Outdated && out.Msg != "" {
+		fmt.Printf("⚠ %s\n", out.Msg)
+	} else if out.ServerVersion != "" {
+		fmt.Printf("✓ 版本一致（服务端 v%s）\n", out.ServerVersion)
 	}
 	return nil
 }
@@ -233,8 +267,8 @@ func readLocalAccount(spoof bool, region string) (*localAccount, error) {
 		RefreshToken string `json:"refreshToken"`
 		DeviceID     string `json:"deviceId"`
 		UserInfo     struct {
-			ID    json.Number `json:"id"`
-			Phone string      `json:"phone"`
+			ID    json.RawMessage `json:"id"` // 数字(国内短信)或字符串(海外 Google/OAuth)
+			Phone string          `json:"phone"`
 		} `json:"userInfo"`
 	}
 	if err := json.Unmarshal(authRaw, &auth); err != nil {
@@ -256,7 +290,7 @@ func readLocalAccount(spoof bool, region string) (*localAccount, error) {
 		return nil, fmt.Errorf("解密 refreshToken 失败: %w", err)
 	}
 	acct := &localAccount{
-		UserID:        auth.UserInfo.ID.String(),
+		UserID:        oaUserIDString(auth.UserInfo.ID),
 		Phone:         auth.UserInfo.Phone,
 		AccessToken:   at,
 		RefreshToken:  rt,

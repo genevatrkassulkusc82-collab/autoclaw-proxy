@@ -149,9 +149,9 @@ func oaLogin(vendor, deviceID, code, state, navigateURI string) (at, rt, userID 
 		return "", "", "", fmt.Errorf("%s-oauth-login code=%d msg=%s", vendor, env.Code, env.Msg)
 	}
 	var d struct {
-		AccessToken  string      `json:"access_token"`
-		RefreshToken string      `json:"refresh_token"`
-		UserID       json.Number `json:"user_id"`
+		AccessToken  string          `json:"access_token"`
+		RefreshToken string          `json:"refresh_token"`
+		UserID       json.RawMessage `json:"user_id"` // 短信登录=数字，Google/Z.ai OAuth=字符串
 	}
 	if err := json.Unmarshal(env.Data, &d); err != nil {
 		return "", "", "", fmt.Errorf("解析登录响应失败: %w", err)
@@ -159,7 +159,17 @@ func oaLogin(vendor, deviceID, code, state, navigateURI string) (at, rt, userID 
 	if d.AccessToken == "" || d.RefreshToken == "" {
 		return "", "", "", fmt.Errorf("登录响应缺少 token (code=%d)", env.Code)
 	}
-	return d.AccessToken, d.RefreshToken, d.UserID.String(), nil
+	return d.AccessToken, d.RefreshToken, oaUserIDString(d.UserID), nil
+}
+
+// oaUserIDString 兼容 user_id 为数字(短信)或字符串(OAuth)，统一成字符串
+func oaUserIDString(raw json.RawMessage) string {
+	s := strings.TrimSpace(string(raw))
+	s = strings.Trim(s, `"`)
+	if s == "null" {
+		return ""
+	}
+	return s
 }
 
 // oaExtractURL 容错提取授权链接（data 可能是字符串或含 url 字段的对象）

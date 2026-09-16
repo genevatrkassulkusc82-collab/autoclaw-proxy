@@ -136,12 +136,35 @@ func normalizePairCode(s string) string {
 }
 
 func handleClientHello(w http.ResponseWriter, r *http.Request) {
-	code := clientCodeFromRequest(r)
+	var body struct {
+		Code    string `json:"code"`
+		Version string `json:"version"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	code := normalizePairCode(body.Code)
+	if code == "" {
+		code = normalizePairCode(r.Header.Get("X-Pair-Code"))
+	}
 	if code == "" || !pairs.valid(code) {
 		writeErr(w, http.StatusUnauthorized, "配对码无效或已过期")
 		return
 	}
-	writeJSON(w, 200, map[string]interface{}{"ok": true, "server": "autoclaw-proxy"})
+	cv := body.Version
+	outdated := cv != Version
+	disp := cv
+	if disp == "" {
+		disp = "旧版/未知"
+	}
+	resp := map[string]interface{}{
+		"ok": true, "server": "autoclaw-proxy",
+		"server_version": Version, "client_version": cv, "outdated": outdated,
+	}
+	if outdated {
+		resp["msg"] = fmt.Sprintf("客户端版本(%s) ≠ 服务端(%s)，请重新下载最新客户端再使用", disp, Version)
+	}
+	writeJSON(w, 200, resp)
 }
 
 func (h *AdminHandler) handleClientPush(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +225,13 @@ func (h *AdminHandler) handleClientPush(w http.ResponseWriter, r *http.Request) 
 const clientSlotMarker = "<<AUTOCLAW_SERVER_URL>>"
 const clientSlotPad = 96
 
+// Version 服务端版本。下载客户端(/client/download)时写入客户端的"版本槽"，
+// 配对(hello)时客户端回报该版本，与服务端当前 Version 比对——不一致即提示重新下载（防止用旧 exe）。
+const Version = "1.0.0"
+
+const clientVersionMarker = "<<AUTOCLAW_CLIENT_VERSION>>"
+const clientVersionPad = 32
+
 // clientExeCandidates 客户端二进制候选路径（相对服务端可执行目录）
 func clientExeCandidates() []string {
 	exe, err := os.Executable()
@@ -228,23 +258,36 @@ func patchClientBinary(origin string) ([]byte, error) {
 	if raw == nil {
 		return nil, fmt.Errorf("未找到客户端二进制（clients/autoclaw-client-windows-amd64.exe）")
 	}
-	idx := bytes.Index(raw, []byte(clientSlotMarker))
+	// 地址槽（必需）
+	out, err := patchSlot(raw, clientSlotMarker, clientSlotPad, origin)
+	if err != nil {
+		return nil, err
+	}
+	// 版本槽（可选：老客户端无此槽则跳过，不影响下载）
+	if patched, verr := patchSlot(out, clientVersionMarker, clientVersionPad, Version); verr == nil {
+		out = patched
+	}
+	return out, nil
+}
+
+// patchSlot 把二进制里 marker+pad 的槽位替换为 value（不足补 \x00）
+func patchSlot(raw []byte, marker string, pad int, value string) ([]byte, error) {
+	idx := bytes.Index(raw, []byte(marker))
 	if idx < 0 {
-		return nil, fmt.Errorf("客户端二进制缺少地址槽")
+		return nil, fmt.Errorf("客户端二进制缺少槽 %s", marker)
 	}
-	if len(origin) > clientSlotPad {
-		return nil, fmt.Errorf("服务器地址过长（>%d）", clientSlotPad)
+	if len(value) > pad {
+		return nil, fmt.Errorf("槽 %s 值过长（>%d）", marker, pad)
 	}
-	slotStart := idx
-	slotEnd := idx + len(clientSlotMarker) + clientSlotPad
+	slotEnd := idx + len(marker) + pad
 	if slotEnd > len(raw) {
-		return nil, fmt.Errorf("地址槽越界")
+		return nil, fmt.Errorf("槽 %s 越界", marker)
 	}
 	out := make([]byte, len(raw))
 	copy(out, raw)
-	region := make([]byte, slotEnd-slotStart)
-	copy(region, []byte(origin)) // 其余保持 \x00
-	copy(out[slotStart:slotEnd], region)
+	region := make([]byte, slotEnd-idx)
+	copy(region, []byte(value)) // 其余保持 \x00
+	copy(out[idx:slotEnd], region)
 	return out, nil
 }
 

@@ -32,7 +32,7 @@ func NewAdminHandler(db *DB, pool *AccountPool, llm *LLMCaller, login *LoginMana
 // Register 注册管理路由（除 ping/login 外全部需会话）
 func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/ping", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]interface{}{"ok": true, "time": time.Now().Unix()})
+		writeJSON(w, 200, map[string]interface{}{"ok": true, "time": time.Now().Unix(), "version": Version})
 	})
 	// 认证接口
 	mux.HandleFunc("POST /admin/login", h.auth.HandleLogin)

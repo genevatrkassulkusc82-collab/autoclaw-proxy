@@ -66,12 +66,12 @@
     <span>🚨</span><span id="rtExpireText"></span>
   </div>
   <div class="stats-bar">
-    <div class="stat-card blue"><div class="stat-body"><div class="label">账号总数</div><div class="value" id="st-acc">-</div><div class="sub" id="st-acc-sub">-</div></div></div>
-    <div class="stat-card green"><div class="stat-body"><div class="label">24h 成功</div><div class="value" id="st-ok">-</div><div class="sub">调用次数</div></div></div>
-    <div class="stat-card orange"><div class="stat-body"><div class="label">24h 失败</div><div class="value" id="st-fail">-</div><div class="sub">调用次数</div></div></div>
-    <div class="stat-card purple"><div class="stat-body"><div class="label">24h Tokens</div><div class="value" id="st-tok">-</div><div class="sub">入 + 出</div></div></div>
-    <div class="stat-card blue"><div class="stat-body"><div class="label">历史请求</div><div class="value" id="st-total">-</div><div class="sub">累计</div></div></div>
-    <div class="stat-card green"><div class="stat-body"><div class="label">API 密钥</div><div class="value" id="st-keys">-</div><div class="sub" id="st-keys-sub">-</div></div></div>
+    <div class="stat-card blue"><span class="stat-icon">🪪</span><div class="stat-body"><div class="label">账号总数</div><div class="value" id="st-acc">-</div><div class="sub" id="st-acc-sub">-</div></div></div>
+    <div class="stat-card green"><span class="stat-icon">✅</span><div class="stat-body"><div class="label">24h 成功</div><div class="value" id="st-ok">-</div><div class="sub">调用次数</div></div></div>
+    <div class="stat-card orange"><span class="stat-icon">⚠️</span><div class="stat-body"><div class="label">24h 失败</div><div class="value" id="st-fail">-</div><div class="sub">调用次数</div></div></div>
+    <div class="stat-card purple"><span class="stat-icon">⚡</span><div class="stat-body"><div class="label">24h Tokens</div><div class="value" id="st-tok">-</div><div class="sub">入 + 出</div></div></div>
+    <div class="stat-card blue"><span class="stat-icon">📈</span><div class="stat-body"><div class="label">历史请求</div><div class="value" id="st-total">-</div><div class="sub">累计</div></div></div>
+    <div class="stat-card green"><span class="stat-icon">🔑</span><div class="stat-body"><div class="label">API 密钥</div><div class="value" id="st-keys">-</div><div class="sub" id="st-keys-sub">-</div></div></div>
   </div>
   <div class="card">
     <div class="card-header"><h2>接入指引</h2><button class="btn btn-sm btn-secondary" onclick="loadStats()">刷新</button></div>
@@ -99,8 +99,6 @@
       <div class="seg" data-r="oversea" onclick="setRegionFilter('oversea')">海外</div>
     </div>
     <button class="btn btn-primary" onclick="importLocal()">📥 导入本机登录态（推荐）</button>
-    <button class="btn btn-secondary" onclick="openSmsModal()">📱 验证码登录</button>
-    <button class="btn btn-secondary" onclick="openOverseaModal()">🌐 海外登录(Z.ai/Google)</button>
     <button class="btn btn-secondary" onclick="loadAccounts()">刷新</button>
     <button class="btn btn-secondary" onclick="resetDevice()">🔄 重置本机设备身份</button>
     <button class="btn btn-secondary" onclick="showPairModal()">🖥 客户端配对码</button>
@@ -109,13 +107,12 @@
     <span class="hint-block" id="import-preview"></span>
   </div>
   <div class="alert-banner warn">
-    <span>💡</span><span><b>多账号可靠流程：</b>在官方 AutoClaw 客户端登录目标账号 → 回到本页点「导入本机登录态」→ 再在官方客户端切换下一个账号重复导入。
-    「验证码登录」为直连上游的补充通道，上游登录端点有客户端 TLS/HTTP2 指纹风控（仅认官方 Electron/真实浏览器），非官方客户端可能持续返回 400001，属上游反自动化策略，非本网关缺陷。</span>
+    <span>💡</span><span><b>多账号可靠流程：</b>在官方 AutoClaw 客户端登录目标账号 → 回到本页点「导入本机登录态」→ 再在官方客户端切换下一个账号重复导入。海外账号可用「客户端配对码」运行 autoclaw-client，走 Z.ai / Google OAuth 登录（浏览器过验证码后自动回调导入）。</span>
   </div>
   <div class="card">
     <div class="card-header"><h2>账号列表</h2></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>ID</th><th>用户</th><th>设备</th><th>区域</th><th>分组</th><th>区域</th><th>状态</th><th>AT 剩余</th><th>RT 剩余</th><th>请求 · Tokens</th><th>额度/会员</th><th>操作</th></tr></thead>
+      <thead><tr><th>ID</th><th>用户</th><th>设备</th><th>区域</th><th>分组</th><th>状态</th><th>AT 剩余</th><th>RT 剩余</th><th>请求 · Tokens</th><th>额度/会员</th><th>操作</th></tr></thead>
       <tbody id="acct-tbody"></tbody>
     </table></div>
   </div>

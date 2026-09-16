@@ -107,10 +107,10 @@ func main() {
 		log.Fatalf("web 资源嵌入失败: %v", err)
 	}
 	// embed 文件无修改时间，浏览器拿不到 Last-Modified/ETag 会启发式强缓存，
-	// 导致升级后用户仍看到旧前端（页签失效那种）。统一 no-cache 强制每次协商。
+	// 导致升级后用户仍看到旧前端（页签失效那种）。统一 no-store 彻底不缓存，保证升级即生效。
 	noCache := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Cache-Control", "no-store")
 			h.ServeHTTP(w, r)
 		})
 	}

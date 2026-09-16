@@ -242,28 +242,35 @@ async function loadAccounts() {
         quotaCell = `<div style="font-weight:700;color:var(--c-primary)">💎 ${fmtPoints(q.total_balance)}</div>` + tags.join(' ') + `<div class="dim">本地 ${q.local_usage.total_requests} 次 / ${fmtNum(q.local_usage.total_tokens)} tok</div>`;
       }
       return `<tr>
-      <td>${a.id}</td>
+      <td class="mono dim">${a.id}</td>
       <td><div class="mono">${a.user_id || '-'}</div><div class="dim mono">${a.phone || ''}</div></td>
       <td>${a.device_spoofed ? '<span class="badge badge-warning">伪造</span>' : '<span class="badge badge-muted">真实(导入)</span>'}
           <div class="dev-id">${esc((a.device_id || '').slice(0, 10))}…</div></td>
-      <td>${a.region === 'oversea' ? '<span class="badge badge-info">海外</span>' : '<span class="badge badge-success">国内</span>'}</td>
+      <td>${a.region === 'oversea'
+        ? `<span class="badge badge-info" style="cursor:pointer" title="点击切换为国内" onclick="switchRegion(${a.id}, 'cn')">🌐 海外</span>`
+        : `<span class="badge badge-success" style="cursor:pointer" title="点击切换为海外" onclick="switchRegion(${a.id}, 'oversea')">🇨🇳 国内</span>`}</td>
       <td>${esc(a.group) || '-'}</td>
-      <td>${regionBadge(a.region, a.id)}</td>
       <td>${statusBadge(a.status)}${a.last_error ? `<div class="dim mono" title="${esc(a.last_error)}">${esc(a.last_error.slice(0, 24))}</div>` : ''}</td>
       <td>${fmtDurH(a.at_remaining_h)}</td>
       <td>${fmtRemainD(a.rt_remaining_d)}</td>
       <td>${a.total_requests} / ${fmtNum(a.total_tokens)}</td>
       <td>${quotaCell}</td>
-      <td style="white-space:nowrap">
-        <button class="btn btn-sm btn-secondary" onclick="switchRegion(${a.id}, '${a.region === 'oversea' ? 'cn' : 'oversea'}')">转${a.region === 'oversea' ? '国内' : '海外'}</button>
-        <button class="btn btn-sm btn-secondary" onclick="showUsage(${a.id})">用量</button>
-        <button class="btn btn-sm btn-secondary" onclick="showQuota(${a.id})">积分</button>
-        <button class="btn btn-sm btn-secondary" onclick="refreshAcct(${a.id}, this)">刷新</button>
-        <button class="btn btn-sm btn-secondary" onclick="toggleAcct(${a.id}, ${!a.enabled})">${a.enabled ? '停用' : '启用'}</button>
-        <button class="btn btn-sm btn-danger" onclick="delAcct(${a.id})">删除</button>
+      <td class="actions-cell">
+        <div class="more-wrap">
+          <button class="btn btn-sm btn-secondary" onclick="toggleMore(event, ${a.id})">⋯ 更多</button>
+          <div class="more-menu" id="more-${a.id}">
+            <button onclick="showUsage(${a.id})">📊 用量</button>
+            <button onclick="showQuota(${a.id})">💎 积分</button>
+            ${a.region === 'oversea' ? `<button onclick="claimRewards(${a.id}, this)">🎁 领积分</button>` : ''}
+            <button onclick="refreshAcct(${a.id}, this)">⟳ 刷新</button>
+            <button onclick="toggleAcct(${a.id}, ${!a.enabled})">${a.enabled ? '⏸ 停用' : '▶ 启用'}</button>
+            <div class="sep"></div>
+            <button class="danger-item" onclick="delAcct(${a.id})">🗑 删除</button>
+          </div>
+        </div>
       </td></tr>`;
     }).join('')
-      || '<tr><td colspan="12"><div class="empty"><div class="icon">🪪</div><p>暂无账号 —— 「导入本机登录态」或「验证码登录」</p></div></td></tr>';
+      || '<tr><td colspan="11"><div class="empty"><div class="icon">🪪</div><p>暂无账号 —— 「导入本机登录态」或「验证码登录」</p></div></td></tr>';
   } catch (e) {}
 }
 
@@ -332,6 +339,38 @@ async function importLocal() {
     loadAccounts(); loadStats();
   } catch (e) { toast('导入失败: ' + e.message, 'error'); }
 }
+
+// 一键领取海外活动积分（grantPromotionReward，幂等；已领返回 0）
+async function claimRewards(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '领取中…'; }
+  try {
+    const r = await api(`/admin/accounts/${id}/claim-rewards`, { method: 'POST' });
+    const n = (r.claimed || []).length;
+    toast(`活动积分领取完成：本次 +${r.total_points || 0} 分（${n} 项到账，扫描 ${r.active_modals || 0} 个进行中活动）`);
+  } catch (e) { toast('领取失败: ' + e.message, 'error'); }
+  if (btn) { btn.disabled = false; btn.textContent = '领积分'; }
+}
+
+// ---- 「⋯ 更多」操作下拉菜单：点击展开，点外部/滚动关闭；fixed 定位避免被表格滚动裁剪 ----
+function toggleMore(ev, id) {
+  ev.stopPropagation();
+  const btn = ev.currentTarget;
+  const menu = document.getElementById('more-' + id);
+  if (!menu) return;
+  const wasOpen = menu.classList.contains('open');
+  closeAllMore();
+  if (!wasOpen) {
+    const r = btn.getBoundingClientRect();
+    menu.style.top = (r.bottom + 4) + 'px';
+    menu.style.left = Math.max(8, r.right - 168) + 'px'; // 右对齐，且不超出左边缘
+    menu.classList.add('open');
+  }
+}
+function closeAllMore() {
+  document.querySelectorAll('.more-menu.open').forEach(m => m.classList.remove('open'));
+}
+document.addEventListener('click', closeAllMore);
+window.addEventListener('scroll', closeAllMore, true);
 
 async function refreshAcct(id, btn) {
   btn.disabled = true; const old = btn.textContent; btn.textContent = '…';

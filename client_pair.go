@@ -216,8 +216,19 @@ func (h *AdminHandler) handleClientPush(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, 500, "账号入库失败: "+err.Error())
 		return
 	}
-	log.Printf("[client] 远程导入账号 id=%d user=%s source=%s", id, acct.UserID, src)
-	writeJSON(w, 200, map[string]interface{}{"ok": true, "account_id": id})
+	log.Printf("[client] 远程导入账号 id=%d user=%s source=%s region=%s", id, acct.UserID, src, acct.Region)
+	resp := map[string]interface{}{"ok": true, "account_id": id}
+	// 海外账号：自动补领活动积分（官方 App 登录会领，OAuth/导入流程不会，这里补上；幂等，已领返回 0）
+	if NormalizeRegion(acct.Region) == RegionOversea {
+		acct.ID = id
+		if res, cerr := ClaimPromotionRewards(h.db, h.pool.egress, acct); cerr == nil {
+			resp["promotion"] = res
+			log.Printf("[client] 海外账号 %d 活动积分领取 total=%v", id, res["total_points"])
+		} else {
+			log.Printf("[client] 海外账号 %d 活动积分领取失败: %v", id, cerr)
+		}
+	}
+	writeJSON(w, 200, resp)
 }
 
 // ---- 客户端下载（下载时把服务器地址写入 exe 地址槽，免配置） ----
@@ -227,7 +238,7 @@ const clientSlotPad = 96
 
 // Version 服务端版本。下载客户端(/client/download)时写入客户端的"版本槽"，
 // 配对(hello)时客户端回报该版本，与服务端当前 Version 比对——不一致即提示重新下载（防止用旧 exe）。
-const Version = "1.0.0"
+const Version = "1.0.1"
 
 const clientVersionMarker = "<<AUTOCLAW_CLIENT_VERSION>>"
 const clientVersionPad = 32

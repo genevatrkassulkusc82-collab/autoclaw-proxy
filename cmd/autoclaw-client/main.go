@@ -52,7 +52,7 @@ func embeddedServerURL() string {
 var embeddedVersionSlot = "<<AUTOCLAW_CLIENT_VERSION>>" + strings.Repeat(string(rune(0)), 32)
 
 // clientVersion 兜底版本（未经 /client/download 打补丁的原始构建用）
-const clientVersion = "1.0.0"
+const clientVersion = "1.0.1"
 
 func embeddedVersion() string {
 	s := strings.TrimRight(embeddedVersionSlot, string(rune(0)))
@@ -357,9 +357,17 @@ func pushAccount(server, code, group, region string, acct *localAccount, source 
 	}
 	var out struct {
 		AccountID int `json:"account_id"`
+		Promotion *struct {
+			TotalPoints  int `json:"total_points"`
+			ActiveModals int `json:"active_modals"`
+		} `json:"promotion"`
 	}
 	json.Unmarshal(b, &out)
 	fmt.Printf("✓ 账号已回传服务器入池 (account_id=%d)\n", out.AccountID)
+	if out.Promotion != nil {
+		fmt.Printf("✓ 活动积分自动补领：本次 +%d 分（扫描 %d 个进行中活动；已领过则为 0）\n",
+			out.Promotion.TotalPoints, out.Promotion.ActiveModals)
+	}
 	return nil
 }
 

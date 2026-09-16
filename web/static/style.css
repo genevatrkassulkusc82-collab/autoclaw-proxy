@@ -204,3 +204,74 @@ pre.out .hl{color:#a5b4fc}
   .brand-mini .brand-txt{display:none}
   .app-content{padding:14px 12px 30px}
 }
+
+/* ============================================================
+   视觉增强层（人性化 · 精修）——追加覆盖默认样式
+   ============================================================ */
+
+/* ---- 全局 ---- */
+body{letter-spacing:.1px}
+.card{transition:box-shadow .22s ease,transform .22s ease}
+.card:hover{box-shadow:var(--shadow-md)}
+.card-header h2{font-size:15.5px;letter-spacing:.2px}
+
+/* ---- 统计卡：左色条 + 顶部淡色渐变 + 图标 ---- */
+.stat-card{border-left:3px solid transparent;padding:15px 18px 15px 16px}
+.stat-card.blue{border-left-color:#3b82f6;background:linear-gradient(180deg,#f4f8ff 0%,#fff 70%)}
+.stat-card.green{border-left-color:#10b981;background:linear-gradient(180deg,#f2fbf6 0%,#fff 70%)}
+.stat-card.orange{border-left-color:#f59e0b;background:linear-gradient(180deg,#fffaf0 0%,#fff 70%)}
+.stat-card.purple{border-left-color:#a855f7;background:linear-gradient(180deg,#faf5ff 0%,#fff 70%)}
+.stat-card .value{font-size:27px}
+.stat-card .label{display:flex;align-items:center;gap:5px}
+.stat-icon{position:absolute;right:14px;top:14px;font-size:21px;opacity:.42;filter:saturate(.75);transition:opacity .2s,transform .2s;pointer-events:none}
+.stat-card:hover .stat-icon{opacity:.8;transform:scale(1.1)}
+
+/* ---- 表格：吸顶表头 + 斑马纹 + 行 hover 色条 ---- */
+thead th{position:sticky;top:0;z-index:2;background:#f7f9fc;font-size:11px;letter-spacing:.4px;color:#7c8aa0;padding:11px 14px}
+tbody tr{transition:background .15s ease}
+tbody tr:nth-child(even){background:#fafbfd}
+tbody tr:hover{background:#eef4ff}
+tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--c-primary)}
+.mini-table tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--c-primary)}
+
+/* ---- 工具栏 / 按钮 ---- */
+.toolbar{padding:12px 16px;gap:9px;align-items:center}
+.btn{border-radius:9px;box-shadow:0 1px 2px rgba(15,23,42,.05);transition:transform .15s ease,box-shadow .15s ease,background .15s ease,color .15s ease,border-color .15s ease}
+.btn:not(:disabled):hover{transform:translateY(-1px)}
+.btn:not(:disabled):active{transform:translateY(0)}
+.btn-primary:hover{box-shadow:0 5px 14px rgba(99,102,241,.4)}
+.btn-sm{border-radius:8px}
+
+/* ---- 表单输入更聚焦 ---- */
+.form-group input:focus,.form-input:focus{border-color:var(--c-primary);box-shadow:0 0 0 3.5px rgba(99,102,241,.16)}
+
+/* ---- 空态 / 提示 ---- */
+.empty{padding:52px 24px}
+.empty .icon{font-size:42px;opacity:.55;filter:grayscale(.15)}
+.hint-block{line-height:1.7}
+
+/* ---- 弹窗更精致 ---- */
+.modal{border:1px solid var(--c-border-light);box-shadow:0 24px 60px -12px rgba(15,23,42,.28)}
+
+/* ---- Toast 带左侧图标条 ---- */
+#toast{border-radius:10px;padding:12px 18px;letter-spacing:.2px}
+
+/* ---- 滚动条 ---- */
+::-webkit-scrollbar-thumb{background:#cdd6e4}
+::-webkit-scrollbar-thumb:hover{background:#b7c2d6}
+
+/* ---- 区域徽标统一样式（可点切换） ---- */
+.badge[onclick]{user-select:none}
+.badge[onclick]:hover{filter:brightness(.96);transform:translateY(-1px)}
+
+/* ---- 「⋯ 更多」操作下拉菜单 ---- */
+.actions-cell{white-space:nowrap}
+.more-wrap{display:inline-block}
+.more-menu{display:none;position:fixed;min-width:168px;background:#fff;border:1px solid var(--c-border);border-radius:11px;box-shadow:0 18px 44px -10px rgba(15,23,42,.24);z-index:1500;padding:5px;flex-direction:column;animation:moreIn .14s ease}
+.more-menu.open{display:flex}
+@keyframes moreIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.more-menu button{display:flex;align-items:center;gap:9px;width:100%;padding:8px 12px;background:none;border:0;border-radius:8px;font-size:13px;font-weight:600;color:#334155;cursor:pointer;text-align:left;transition:background .12s}
+.more-menu button:hover{background:#eef2f9}
+.more-menu button.danger-item{color:var(--c-danger)}
+.more-menu button.danger-item:hover{background:#fef2f2}
+.more-menu .sep{height:1px;background:var(--c-border-light);margin:4px 6px}

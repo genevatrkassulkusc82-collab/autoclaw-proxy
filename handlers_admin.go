@@ -49,6 +49,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/accounts/{id}/enable", a(h.handleEnableAccount))
 	mux.HandleFunc("POST /admin/accounts/{id}/disable", a(h.handleDisableAccount))
 	mux.HandleFunc("POST /admin/accounts/{id}/region", a(h.handleSetRegion))
+	mux.HandleFunc("POST /admin/accounts/{id}/claim-rewards", a(h.handleClaimRewards))
 	mux.HandleFunc("GET /admin/regions", a(h.handleRegions))
 	mux.HandleFunc("DELETE /admin/accounts/{id}", a(h.handleDeleteAccount))
 	mux.HandleFunc("POST /admin/login/send-code", a(h.handleSendCode))

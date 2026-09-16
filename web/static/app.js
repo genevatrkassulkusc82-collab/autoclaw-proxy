@@ -434,6 +434,54 @@ async function verifyLogin() {
   }
 }
 
+// ---- 海外 OAuth 登录（Z.ai / Google）：生成链接 → 用户浏览器登录 → 粘回 localhost 回调 ----
+
+let ovFlowID = '';
+
+function openOverseaModal() {
+  ovFlowID = '';
+  $('#ov-step2').style.display = 'none';
+  $('#ov-status').textContent = '';
+  $('#ov-callback').value = '';
+  $('#ov-url').value = '';
+  showModal('overseaModal');
+}
+
+async function overseaStart() {
+  const btn = $('#ov-start-btn');
+  btn.disabled = true; btn.textContent = '生成中（过验证码…）';
+  $('#ov-status').textContent = '';
+  try {
+    const r = await api('/admin/login/oversea/start', { method: 'POST', body: { vendor: $('#ov-vendor').value, group: $('#ov-group').value.trim() } });
+    ovFlowID = r.flow_id;
+    $('#ov-url').value = r.authorize_url;
+    $('#ov-open').href = r.authorize_url;
+    $('#ov-step2').style.display = 'block';
+    $('#ov-status').textContent = '链接已生成（' + r.vendor + ' · 回调 ' + r.callback_uri + '）。点「打开链接登录」，登录后把地址栏 localhost 链接粘到下面。';
+  } catch (e) {
+    $('#ov-status').textContent = '❌ 生成失败: ' + e.message;
+  }
+  btn.disabled = false; btn.textContent = '① 生成授权链接';
+}
+
+async function overseaComplete() {
+  const cb = $('#ov-callback').value.trim();
+  if (!ovFlowID) return toast('请先生成授权链接', 'error');
+  if (!cb) { $('#ov-status').textContent = '❌ 请先粘贴 localhost 回调链接'; return; }
+  const btn = $('#ov-done-btn');
+  btn.disabled = true; btn.textContent = '登录中…';
+  try {
+    const r = await api('/admin/login/oversea/complete', { method: 'POST', body: { flow_id: ovFlowID, callback_url: cb } });
+    hideModal('overseaModal');
+    ovFlowID = '';
+    toast('海外账号已入库 (id=' + r.account.id + ' · 区域=海外)');
+    loadAccounts(); loadStats();
+  } catch (e) {
+    $('#ov-status').textContent = '❌ 完成失败: ' + e.message;
+  }
+  btn.disabled = false; btn.textContent = '④ 完成登录';
+}
+
 // ---- 在线测试 ----
 
 async function loadTestTab() {
@@ -531,6 +579,7 @@ async function loadModels() {
     const r = await api('/admin/models');
     $('#model-tbody').innerHTML = (r.models || []).map(m => `<tr>
       <td class="mono">${esc(m.id)}</td><td>${esc(m.name || '-')}</td>
+      <td>${(m.regions || []).map(x => x === 'oversea' ? '<span class="badge badge-info">海外</span>' : '<span class="badge badge-success">国内</span>').join(' ') || '-'}</td>
       <td>${m.reasoning ? '✓' : ''}</td><td>${(m.input || []).join(',')}</td>
       <td>${m.contextWindow ? fmtNum(m.contextWindow) : '-'}</td>
       <td>${m.maxTokens ? fmtNum(m.maxTokens) : '-'}</td>

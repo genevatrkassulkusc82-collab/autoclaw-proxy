@@ -100,6 +100,7 @@
     </div>
     <button class="btn btn-primary" onclick="importLocal()">📥 导入本机登录态（推荐）</button>
     <button class="btn btn-secondary" onclick="openSmsModal()">📱 验证码登录</button>
+    <button class="btn btn-secondary" onclick="openOverseaModal()">🌐 海外登录(Z.ai/Google)</button>
     <button class="btn btn-secondary" onclick="loadAccounts()">刷新</button>
     <button class="btn btn-secondary" onclick="resetDevice()">🔄 重置本机设备身份</button>
     <button class="btn btn-secondary" onclick="showPairModal()">🖥 客户端配对码</button>
@@ -165,7 +166,7 @@
   <div class="card">
     <div class="card-header"><h2>模型目录</h2></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>路由 ID</th><th>名称</th><th>推理</th><th>输入</th><th>上下文</th><th>maxTokens</th><th>说明</th></tr></thead>
+      <thead><tr><th>路由 ID</th><th>名称</th><th>区域</th><th>推理</th><th>输入</th><th>上下文</th><th>maxTokens</th><th>说明</th></tr></thead>
       <tbody id="model-tbody"></tbody>
     </table></div>
   </div>
@@ -383,6 +384,37 @@ autoclaw-client-windows-amd64.exe -server http://&lt;本服务器&gt;:8317 -code
       <a class="btn btn-primary" href="/client/download" download>⬇ 下载客户端（已内置服务器地址）</a>
       <button class="btn btn-secondary" onclick="issuePairCode()">重新生成配对码</button>
       <button class="btn btn-secondary" onclick="hideModal('pairModal')">关闭</button>
+    </div>
+  </div>
+</div>
+<!-- 海外 OAuth 登录弹窗（Z.ai / Google）-->
+<div class="modal-overlay" id="overseaModal">
+  <div class="modal" style="max-width:660px">
+    <h3>🌐 海外登录（Z.ai / Google OAuth）</h3>
+    <div class="hint-block">流程：① 选方式点「生成授权链接」（网关自动过阿里云验证码并取后端签名链接）→ ② 在<b>你自己的浏览器</b>打开链接登录 → ③ 登录后浏览器跳到 <span class="mono">http://localhost:18432/auth/callback-…?code=…&amp;state=…</span>（页面打不开属正常）→ ④ 复制地址栏整条链接粘到下方，点「完成登录」入库为海外账号。</div>
+    <div class="grid-2">
+      <div class="form-group"><label class="form-label">登录方式</label>
+        <select class="form-input" id="ov-vendor"><option value="zai">Z.ai 账号</option><option value="google">Google</option></select></div>
+      <div class="form-group"><label class="form-label">分组（可选）</label>
+        <input class="form-input" id="ov-group" placeholder="留空=默认"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="ov-start-btn" onclick="overseaStart()">① 生成授权链接</button>
+      <button class="btn btn-secondary" onclick="hideModal('overseaModal')">关闭</button>
+    </div>
+    <div id="ov-step2" style="display:none">
+      <div class="form-group"><label class="form-label">授权链接（在新标签打开登录）</label>
+        <textarea class="form-input mono" id="ov-url" rows="3" readonly></textarea></div>
+      <div class="modal-actions">
+        <a class="btn btn-primary" id="ov-open" href="#" target="_blank" rel="noopener">② 打开链接登录</a>
+        <button class="btn btn-secondary" onclick="navigator.clipboard.writeText($('#ov-url').value);toast('已复制授权链接')">复制链接</button>
+      </div>
+      <div class="form-group"><label class="form-label">③ 登录后地址栏的 localhost 回调链接，整条粘贴到这里</label>
+        <textarea class="form-input mono" id="ov-callback" rows="2" placeholder="http://localhost:18432/auth/callback-zai?code=...&state=aosi..."></textarea></div>
+      <div class="hint-block" id="ov-status"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="ov-done-btn" onclick="overseaComplete()">④ 完成登录</button>
+      </div>
     </div>
   </div>
 </div>

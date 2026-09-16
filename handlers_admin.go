@@ -275,11 +275,11 @@ func (h *AdminHandler) handleLoginVerify(w http.ResponseWriter, r *http.Request)
 // ---- 模型 ----
 
 func (h *AdminHandler) handleModels(w http.ResponseWriter, r *http.Request) {
-	models := h.llm.CatalogUnion()
 	if regionParam := r.URL.Query().Get("region"); regionParam != "" {
-		models = h.llm.Catalog(NormalizeRegion(regionParam))
+		writeJSON(w, 200, map[string]interface{}{"models": h.llm.Catalog(NormalizeRegion(regionParam)), "regions": AllRegions()})
+		return
 	}
-	writeJSON(w, 200, map[string]interface{}{"models": models, "regions": AllRegions()})
+	writeJSON(w, 200, map[string]interface{}{"models": h.llm.CatalogWithRegions(), "regions": AllRegions()})
 }
 
 func (h *AdminHandler) handleModelsSync(w http.ResponseWriter, r *http.Request) {
@@ -293,11 +293,9 @@ func (h *AdminHandler) handleModelsSync(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 200, map[string]interface{}{"models": models, "count": len(models), "region": string(rg)})
 		return
 	}
-	synced := h.llm.SyncAllCatalogs() // 不指定区域=同步所有有账号的区域
-	writeJSON(w, 200, map[string]interface{}{"synced": synced, "models": h.llm.CatalogUnion()})
+	counts := h.llm.SyncAllRegions()
+	writeJSON(w, 200, map[string]interface{}{"synced": counts, "models": h.llm.CatalogWithRegions()})
 }
-
-// ---- 代理 ----
 
 func (h *AdminHandler) handleListProxies(w http.ResponseWriter, r *http.Request) {
 	nodes, err := h.db.ListProxyNodes()

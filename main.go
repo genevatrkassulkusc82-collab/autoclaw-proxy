@@ -144,6 +144,10 @@ func main() {
 	}
 	log.Printf("  TLS 指纹:     %s（settings.tls_mode 可调）", fingerprintHook().Mode)
 	log.Printf("  数据目录:     %s", *dataDir)
+	go func() {
+		counts := llm.SyncAllRegions()
+		log.Printf("[models] 启动同步完成: %v", counts)
+	}()
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("服务退出: %v", err)
 	}

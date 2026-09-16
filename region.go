@@ -139,3 +139,8 @@ func RegionOpenclawHomeCandidates(r Region, db *DB) []string {
 	}
 	return []string{filepath.Join(home, ".openclaw-autoclaw")}
 }
+
+// AllRegionValues 内部使用的区域值列表（AllRegions 为 JSON 展示用）
+func AllRegionValues() []Region {
+	return []Region{RegionCN, RegionOversea}
+}

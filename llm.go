@@ -8,7 +8,6 @@ package main
 //   401 → 刷新 token 重试一次；429/5xx → 账号冷却 + 换号
 
 import (
-	"sync"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -18,6 +17,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,13 +27,13 @@ import (
 type LLMCaller struct {
 	comboMu    sync.Mutex
 	comboCache map[int64]string
-	db   *DB
-	pool *AccountPool
+	db         *DB
+	pool       *AccountPool
 }
 
 // NewLLMCaller 创建调用器
 func NewLLMCaller(db *DB, pool *AccountPool) *LLMCaller {
-	return &LLMCaller{comboCache: map[int64]string{},db: db, pool: pool}
+	return &LLMCaller{comboCache: map[int64]string{}, db: db, pool: pool}
 }
 
 var modelPrefixRe = regexp.MustCompile(`^[a-z]+_`)
@@ -318,7 +318,6 @@ func (c *LLMCaller) doCombo(ctx context.Context, a *Account, route string, reque
 	return client.Do(req)
 }
 
-
 func parseInt(s string) (int, error) {
 	var n int
 	_, err := fmt.Sscan(strings.TrimSpace(s), &n)
@@ -393,7 +392,11 @@ func (c *LLMCaller) Catalog(region Region) []RemoteModel {
 			return models
 		}
 	}
-	return builtinCatalog()
+	// 仅国内回退内置快照；海外无缓存时返回空（避免把国内目录冒充海外目录）
+	if region == DefaultRegion {
+		return builtinCatalog()
+	}
+	return nil
 }
 
 // CatalogUnion 所有"有账号的区域"目录的并集（按 ID 去重），用于 /v1/models 默认列表。
@@ -469,4 +472,43 @@ func builtinCatalog() []RemoteModel {
 		{ID: "zaicoding_glm-5.3", Name: "GLM-5.3", Reasoning: true, Input: []string{"text"}, ContextWindow: 1048576, MaxTokens: 307200, Tooltip: "全新旗舰，Coding 与安全能力升级"},
 		{ID: "zai_glm-5.3-flash", Name: "GLM-5.3-Flash", Reasoning: true, Input: []string{"text"}, ContextWindow: 200000, MaxTokens: 128000, Tooltip: "轻量快速"},
 	}
+}
+// ModelWithRegions 模型 + 可用区域（同一模型可能国内/海外都有）
+type ModelWithRegions struct {
+	RemoteModel
+	Regions []string `json:"regions"`
+}
+
+// CatalogWithRegions 全部区域目录聚合，标注每个模型的可用区域
+func (c *LLMCaller) CatalogWithRegions() []ModelWithRegions {
+	byID := map[string]*ModelWithRegions{}
+	var order []string
+	for _, rg := range AllRegionValues() {
+		for _, m := range c.Catalog(rg) {
+			if _, ok := byID[m.ID]; !ok {
+				byID[m.ID] = &ModelWithRegions{RemoteModel: m}
+				order = append(order, m.ID)
+			}
+			byID[m.ID].Regions = append(byID[m.ID].Regions, string(rg))
+		}
+	}
+	var out []ModelWithRegions
+	for _, id := range order {
+		out = append(out, *byID[id])
+	}
+	return out
+}
+
+// SyncAllRegions 同步所有区域模型目录
+func (c *LLMCaller) SyncAllRegions() map[Region]int {
+	out := map[Region]int{}
+	for _, rg := range AllRegionValues() {
+		if models, err := c.SyncCatalog(rg); err == nil {
+			out[rg] = len(models)
+		} else {
+			log.Printf("[models] 同步失败 region=%s: %v", rg, err)
+			out[rg] = -1
+		}
+	}
+	return out
 }

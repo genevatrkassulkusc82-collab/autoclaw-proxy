@@ -109,7 +109,7 @@
   <div class="card">
     <div class="card-header"><h2>账号列表</h2></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>ID</th><th>用户</th><th>设备</th><th>分组</th><th>状态</th><th>AT 剩余</th><th>RT 剩余</th><th>请求 · Tokens</th><th>操作</th></tr></thead>
+      <thead><tr><th>ID</th><th>用户</th><th>设备</th><th>分组</th><th>区域</th><th>状态</th><th>AT 剩余</th><th>RT 剩余</th><th>请求 · Tokens</th><th>额度/会员</th><th>操作</th></tr></thead>
       <tbody id="acct-tbody"></tbody>
     </table></div>
   </div>
@@ -379,6 +379,26 @@ autoclaw-client-windows-amd64.exe -server http://&lt;本服务器&gt;:8317 -code
       <button class="btn btn-secondary" onclick="issuePairCode()">重新生成配对码</button>
       <button class="btn btn-secondary" onclick="hideModal('pairModal')">关闭</button>
     </div>
+  </div>
+</div>
+<!-- 用量统计弹窗 -->
+<div class="modal-overlay" id="usageModal">
+  <div class="modal" style="max-width:720px">
+    <h3>📊 用量统计</h3>
+    <div class="stats-bar" id="usage-summary"></div>
+    <div class="table-wrap" style="max-height:320px;overflow-y:auto"><table class="mini-table">
+      <thead><tr><th>时间</th><th>模型</th><th>路由</th><th>状态</th><th>Tokens(入/出)</th><th>TTFT</th><th>耗时</th></tr></thead>
+      <tbody id="usage-records"></tbody>
+    </table></div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="hideModal('usageModal')">关闭</button></div>
+  </div>
+</div>
+<!-- 积分详情弹窗 -->
+<div class="modal-overlay" id="quotaModal">
+  <div class="modal" style="max-width:640px">
+    <h3>💎 积分详情（上游会员/套餐 + 本地用量）</h3>
+    <div id="quota-body"></div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="hideModal('quotaModal')">关闭</button></div>
   </div>
 </div>
 <div id="toast"></div>

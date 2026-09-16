@@ -47,6 +47,8 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/accounts/{id}/refresh", a(h.handleRefreshAccount))
 	mux.HandleFunc("POST /admin/accounts/{id}/enable", a(h.handleEnableAccount))
 	mux.HandleFunc("POST /admin/accounts/{id}/disable", a(h.handleDisableAccount))
+	mux.HandleFunc("POST /admin/accounts/{id}/region", a(h.handleSetRegion))
+	mux.HandleFunc("GET /admin/regions", a(h.handleRegions))
 	mux.HandleFunc("DELETE /admin/accounts/{id}", a(h.handleDeleteAccount))
 	mux.HandleFunc("POST /admin/login/send-code", a(h.handleSendCode))
 	mux.HandleFunc("POST /admin/login/verify", a(h.handleLoginVerify))
@@ -60,6 +62,9 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/settings", a(h.handleGetSettings))
 	mux.HandleFunc("POST /admin/settings", a(h.handleSaveSettings))
 	mux.HandleFunc("GET /admin/usage", a(h.handleUsage))
+	mux.HandleFunc("GET /admin/accounts/{id}/quota", a(h.handleAccountQuota))
+	mux.HandleFunc("GET /admin/accounts/quota-all", a(h.handleAccountsQuotaAll))
+	mux.HandleFunc("GET /admin/accounts/{id}/usage", a(h.handleAccountUsage))
 	mux.HandleFunc("GET /admin/browser/status", a(h.handleBrowserStatus))
 	mux.HandleFunc("POST /admin/browser/fingerprint-check", a(h.handleBrowserCheck))
 	mux.HandleFunc("POST /admin/test/chat", a(h.handleTestChat))
@@ -104,7 +109,8 @@ func accountView(a *Account) map[string]interface{} {
 		"at_exp": a.AtExp, "rt_exp": a.RtExp, "cooldown_until": a.CooldownUntil,
 		"last_error": a.LastError, "total_requests": a.TotalRequests,
 		"total_tokens": a.TotalTokens, "failed_streak": a.FailedStreak,
-		"source": a.Source, "created_at": a.CreatedAt, "updated_at": a.UpdatedAt,
+		"source": a.Source, "region": string(accountRegion(a)), "region_label": accountRegion(a).Profile().Label,
+		"created_at": a.CreatedAt, "updated_at": a.UpdatedAt,
 	}
 	if a.AtExp > 0 {
 		v["at_remaining_h"] = float64(a.AtExp-time.Now().Unix()) / 3600
@@ -140,10 +146,11 @@ func (h *AdminHandler) handleImportPreview(w http.ResponseWriter, r *http.Reques
 
 func (h *AdminHandler) handleImportLocal(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Group string `json:"group"`
+		Group  string `json:"group"`
+		Region string `json:"region"` // 空=自动识别（读 openclaw.json baseUrl）
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	a, err := ImportLocalAccount(h.db, req.Group)
+	a, err := ImportLocalAccount(h.db, req.Group, req.Region)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -190,6 +197,28 @@ func (h *AdminHandler) handleDeleteAccount(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"ok": true})
+}
+
+// handleSetRegion 切换账号区域（国内/海外）→ 改变其上游 host 与 X-Lang
+func (h *AdminHandler) handleSetRegion(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Region string `json:"region"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "请求体解析失败")
+		return
+	}
+	if err := h.db.SetAccountRegion(pathID(r), req.Region); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	CloseIdleClients()
+	writeJSON(w, 200, map[string]interface{}{"ok": true, "region": string(NormalizeRegion(req.Region))})
+}
+
+// handleRegions 返回可选区域列表（UI 下拉/徽标用）
+func (h *AdminHandler) handleRegions(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"regions": AllRegions(), "default": string(DefaultRegion)})
 }
 
 // ---- 在线验证码登录（SMS）----

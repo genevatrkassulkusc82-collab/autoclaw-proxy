@@ -277,9 +277,9 @@ func orDefaultInt(v, def int) int {
 
 func (d *DB) ListAccounts() ([]*Account, error) {
 	rows, err := d.conn.Query(`SELECT id,user_id,phone,access_token,refresh_token,device_id,
- public_key_pem,private_key_pem,device_spoofed,account_group,status,strategy,enabled,
- at_exp,rt_exp,cooldown_until,last_error,total_requests,total_tokens,failed_streak,source,created_at,updated_at
- FROM accounts ORDER BY id`)
+	 public_key_pem,private_key_pem,device_spoofed,account_group,status,strategy,enabled,
+	 at_exp,rt_exp,cooldown_until,last_error,total_requests,total_tokens,failed_streak,source,region,created_at,updated_at
+	 FROM accounts ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +290,7 @@ func (d *DB) ListAccounts() ([]*Account, error) {
 		if err := rows.Scan(&a.ID, &a.UserID, &a.Phone, &a.AccessToken, &a.RefreshToken, &a.DeviceID,
 			&a.PublicKeyPem, &a.PrivateKeyPem, &a.DeviceSpoofed, &a.AccountGroup, &a.Status, &a.Strategy,
 			&a.Enabled, &a.AtExp, &a.RtExp, &a.CooldownUntil, &a.LastError, &a.TotalRequests,
-			&a.TotalTokens, &a.FailedStreak, &a.Source, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.TotalTokens, &a.FailedStreak, &a.Source, &a.Region, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -360,6 +360,15 @@ func (d *DB) DeleteAccount(id int64) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	_, err := d.conn.Exec(`DELETE FROM accounts WHERE id=?`, id)
+	return err
+}
+
+// SetAccountRegion 切换账号区域（国内/海外）；非法值归一化为默认区域
+func (d *DB) SetAccountRegion(id int64, region string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec(`UPDATE accounts SET region=?, updated_at=? WHERE id=?`,
+		string(NormalizeRegion(region)), time.Now().UnixMilli(), id)
 	return err
 }
 

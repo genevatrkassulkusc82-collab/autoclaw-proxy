@@ -212,28 +212,104 @@ curl ${location.origin}/v1/chat/completions \\
 
 // ---- 账号管理 ----
 
+let quotaMap = {};
+
 async function loadAccounts() {
   try {
-    const r = await api('/admin/accounts');
+    const [r, q] = await Promise.all([
+      api('/admin/accounts'),
+      api('/admin/accounts/quota-all').catch(() => ({ quotas: [] })),
+    ]);
+    quotaMap = {};
+    (q.quotas || []).forEach(x => { quotaMap[x.account_id] = x; });
     const list = r.accounts || [];
     $('#accCount').textContent = `共 ${list.length} 个`;
-    $('#acct-tbody').innerHTML = list.map(a => `<tr>
+    $('#acct-tbody').innerHTML = list.map(a => {
+      const q = quotaMap[a.id];
+      let quotaCell = '<span class="dim">-</span>';
+      if (q) {
+        const tags = [];
+        if (q.is_member) tags.push('<span class="badge badge-success">会员</span>');
+        if (q.has_code_plan) tags.push('<span class="badge badge-info">编码计划</span>');
+        if (!tags.length) tags.push('<span class="badge badge-muted">免费</span>');
+        quotaCell = tags.join(' ') + `<div class="dim">本地 ${q.local_usage.total_requests} 次 / ${fmtNum(q.local_usage.total_tokens)} tok</div>`;
+      }
+      return `<tr>
       <td>${a.id}</td>
       <td><div class="mono">${a.user_id || '-'}</div><div class="dim mono">${a.phone || ''}</div></td>
       <td>${a.device_spoofed ? '<span class="badge badge-warning">伪造</span>' : '<span class="badge badge-muted">真实(导入)</span>'}
           <div class="dev-id">${esc((a.device_id || '').slice(0, 10))}…</div></td>
       <td>${esc(a.group) || '-'}</td>
+      <td>${regionBadge(a.region, a.id)}</td>
       <td>${statusBadge(a.status)}${a.last_error ? `<div class="dim mono" title="${esc(a.last_error)}">${esc(a.last_error.slice(0, 24))}</div>` : ''}</td>
       <td>${fmtDurH(a.at_remaining_h)}</td>
       <td>${fmtRemainD(a.rt_remaining_d)}</td>
       <td>${a.total_requests} / ${fmtNum(a.total_tokens)}</td>
+      <td>${quotaCell}</td>
       <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-secondary" onclick="showUsage(${a.id})">用量</button>
+        <button class="btn btn-sm btn-secondary" onclick="showQuota(${a.id})">积分</button>
         <button class="btn btn-sm btn-secondary" onclick="refreshAcct(${a.id}, this)">刷新</button>
         <button class="btn btn-sm btn-secondary" onclick="toggleAcct(${a.id}, ${!a.enabled})">${a.enabled ? '停用' : '启用'}</button>
         <button class="btn btn-sm btn-danger" onclick="delAcct(${a.id})">删除</button>
-      </td></tr>`).join('')
-      || '<tr><td colspan="9"><div class="empty"><div class="icon">🪪</div><p>暂无账号 —— 「📱 验证码登录」新建或「📥 导入本机登录态」</p></div></td></tr>';
+      </td></tr>`;
+    }).join('')
+      || '<tr><td colspan="11"><div class="empty"><div class="icon">🪪</div><p>暂无账号 —— 「导入本机登录态」或「验证码登录」</p></div></td></tr>';
   } catch (e) {}
+}
+
+// 区域徽标：国内(zhipuai.cn) ↔ 海外(autoglm.ai)，点击即切换该账号上游 host 与 X-Lang
+function regionBadge(region, id) {
+  const oversea = region === 'oversea';
+  const label = oversea ? '海外' : '国内';
+  const cls = oversea ? 'badge-info' : 'badge-muted';
+  const to = oversea ? 'cn' : 'oversea';
+  return `<span class="badge ${cls}" style="cursor:pointer" title="点击切换为${oversea ? '国内' : '海外'}" onclick="toggleRegion(${id}, '${to}')">${label}</span>`;
+}
+
+async function toggleRegion(id, region) {
+  try {
+    await api(`/admin/accounts/${id}/region`, { method: 'POST', body: { region } });
+    toast('区域已切换为 ' + (region === 'oversea' ? '海外 (autoglm.ai · en)' : '国内 (zhipuai.cn · zh-CN)'));
+    loadAccounts();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function showUsage(id) {
+  try {
+    const r = await api('/admin/accounts/' + id + '/usage?limit=100');
+    const s = r.summary || {};
+    $('#usage-summary').innerHTML = `
+      <div class="stat-card blue"><div class="stat-body"><div class="label">总请求</div><div class="value">${s.total_requests || 0}</div></div></div>
+      <div class="stat-card green"><div class="stat-body"><div class="label">成功</div><div class="value">${s.ok_requests || 0}</div></div></div>
+      <div class="stat-card purple"><div class="stat-body"><div class="label">总 Tokens</div><div class="value">${fmtNum(s.total_tokens || 0)}</div></div></div>
+      <div class="stat-card orange"><div class="stat-body"><div class="label">入/出</div><div class="value" style="font-size:16px">${fmtNum(s.prompt_tokens || 0)} / ${fmtNum(s.comp_tokens || 0)}</div></div></div>`;
+    $('#usage-records').innerHTML = (r.records || []).map(u => `<tr>
+      <td class="mono">${fmtTs(u.created_at)}</td><td class="mono">${esc(u.model)}</td><td class="mono">${esc(u.route)}</td>
+      <td>${u.status === 200 ? '<span class="badge badge-success">200</span>' : '<span class="badge badge-danger">' + u.status + '</span>'}</td>
+      <td>${u.prompt_tokens}/${u.completion_tokens}</td><td>${u.ttft_ms ? u.ttft_ms + 'ms' : '-'}</td><td>${u.latency_ms}ms</td></tr>`).join('')
+      || '<tr><td colspan="7"><div class="empty"><p>暂无用量记录</p></div></td></tr>';
+    showModal('usageModal');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function showQuota(id) {
+  try {
+    const q = await api('/admin/accounts/' + id + '/quota');
+    const tags = [];
+    if (q.is_member) tags.push('<span class="badge badge-success">会员</span>');
+    if (q.has_code_plan) tags.push('<span class="badge badge-info">编码计划</span>');
+    if (!tags.length) tags.push('<span class="badge badge-muted">免费档</span>');
+    let plans = (q.plans || []).map(p => `<tr><td>${esc(p.name)}</td><td>Lv${p.level}</td><td>${p.send_score_day}/天</td><td>${fmtNum(p.send_score_month)}/月</td><td>¥${(p.price / 100).toFixed(2)}</td></tr>`).join('');
+    $('#quota-body').innerHTML = `
+      <div class="hint-block" style="margin-bottom:10px">身份：${tags.join(' ')}　|　上游查询时间：${fmtTs(q.fetched_at * 1000)}${q.upstream_error ? '　<span class="dim">(' + esc(q.upstream_error) + ')</span>' : ''}</div>
+      <div class="section-subhead">套餐额度目录（上游 product-info）</div>
+      <div class="table-wrap"><table class="mini-table"><thead><tr><th>套餐</th><th>档位</th><th>积分/天</th><th>积分/月</th><th>价格</th></tr></thead><tbody>${plans || '<tr><td colspan="5"><div class="empty"><p>无套餐数据</p></div></td></tr>'}</tbody></table></div>
+      <div class="section-subhead">本地用量（经过本网关）</div>
+      <div class="hint-block">总请求 ${q.local_usage.total_requests}（成功 ${q.local_usage.ok_requests}）· 总 Tokens ${fmtNum(q.local_usage.total_tokens)}（入 ${fmtNum(q.local_usage.prompt_tokens)} / 出 ${fmtNum(q.local_usage.comp_tokens)}）· 最近使用 ${q.local_usage.last_used_at ? fmtTs(q.local_usage.last_used_at) : '从未'}</div>
+      <div class="hint-block dim">注：上游无单一"剩余积分"数值端点；积分详情=会员/订阅状态+套餐额度目录，剩余量以本地用量推算。</div>`;
+    showModal('quotaModal');
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 async function importLocal() {

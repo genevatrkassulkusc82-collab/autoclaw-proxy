@@ -49,6 +49,7 @@ type UserAPIClient struct {
 	Host      string // userapi/代理主机（默认生产加速域名）
 	ProxyURL  string // 出口代理（空=直连）
 	Timeout   time.Duration
+	Lang      string // X-Lang（空=默认 zh-CN；海外账号传 "en"）
 	// Bridge 可选：真实浏览器 HTTP 桥（go-rod 页面内 fetch），借用浏览器真实
 	// TLS/HTTP2/TCP/cookie 指纹。用于被风控仅认官方客户端指纹的高风险端点（login）。
 	Bridge func(method, url string, headers map[string]string, body string) (int, string, error)
@@ -99,6 +100,15 @@ func commonHeaders(accessToken string) map[string]string {
 	return h
 }
 
+// headers 在 commonHeaders 基础上按客户端区域覆盖 X-Lang（海外=en，国内=zh-CN）
+func (c *UserAPIClient) headers(accessToken string) map[string]string {
+	h := commonHeaders(accessToken)
+	if c.Lang != "" {
+		h["X-Lang"] = c.Lang
+	}
+	return h
+}
+
 // APIEnvelope userapi 统一响应信封
 type APIEnvelope struct {
 	Code    int             `json:"code"`
@@ -110,6 +120,28 @@ type APIEnvelope struct {
 }
 
 func (e *APIEnvelope) OK() bool { return e.Code == 0 && len(e.Data) > 0 }
+
+// postRaw 原始 POST：自定义头+body，返回响应体字节（跟随重定向、带 cookie jar）
+func (c *UserAPIClient) postRaw(path string, headers map[string]string, body []byte) ([]byte, error) {
+	client := PlainClientForProxy(c.ProxyURL, c.Timeout)
+	req, err := http.NewRequest(http.MethodPost, c.Host+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode != http.StatusOK {
+		return nil, sanitizeUpstreamError(resp.StatusCode, extractUpstreamReqID(raw))
+	}
+	return raw, nil
+}
 
 // post JSON POST 到 {host}{path}
 // 重定向策略: 307/308（保留 method+body）手动跟随最多 3 次 —— 官方部分端点
@@ -124,7 +156,7 @@ func (c *UserAPIClient) post(path string, body interface{}, accessToken string) 
 
 	// 浏览器桥：真实 Chrome 网络栈（fetch 自动跟随 307 并携带 cookie），单跳即可
 	if c.Bridge != nil {
-		hdrs := commonHeaders(accessToken)
+		hdrs := c.headers(accessToken)
 		status, text, berr := c.Bridge("POST", url, hdrs, string(payload))
 		if berr != nil {
 			return nil, berr
@@ -143,7 +175,7 @@ func (c *UserAPIClient) post(path string, body interface{}, accessToken string) 
 		if err != nil {
 			return nil, err
 		}
-		for k, v := range commonHeaders(accessToken) {
+		for k, v := range c.headers(accessToken) {
 			req.Header.Set(k, v)
 		}
 		resp, err := client.Do(req)
@@ -314,7 +346,7 @@ func (c *UserAPIClient) FetchModelCatalog(accessToken string) ([]RemoteModel, er
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range commonHeaders(accessToken) {
+	for k, v := range c.headers(accessToken) {
 		req.Header.Set(k, v)
 	}
 	client := ClientForProxy(c.ProxyURL, 15*time.Second)

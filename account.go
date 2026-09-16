@@ -152,7 +152,8 @@ func (p *AccountPool) RefreshAccount(a *Account, force bool) (string, error) {
 		return "", errors.New("账号缺少 refresh_token，需要重新登录")
 	}
 
-	client := NewUserAPIClient(hostSetting(p.db), p.egress.ProxyURLForAccount(fresh))
+	client := NewUserAPIClient(RegionHost(p.db, fresh), p.egress.ProxyURLForAccount(fresh))
+	client.Lang = RegionLang(fresh)
 	rr, err := client.Refresh(fresh.DeviceID, fresh.RefreshToken, fresh.AccessToken)
 	if err != nil {
 		msg := err.Error()
@@ -181,13 +182,8 @@ func (p *AccountPool) EnsureValidToken(a *Account) (string, error) {
 	return p.RefreshAccount(a, true)
 }
 
-// hostSetting userapi/LLM 主机（settings 可覆盖，默认生产加速域名）
-func hostSetting(db *DB) string {
-	if v, _ := db.GetSetting("upstream_host"); strings.TrimSpace(v) != "" {
-		return strings.TrimSpace(v)
-	}
-	return defaultUserapiHost
-}
+// hostSetting 已废弃：保留兼容旧引用，实际主机解析统一走 RegionHost（按账号区域）。
+func hostSetting(db *DB) string { return RegionHost(db, nil) }
 
 // SMSLoginFlow 在线验证码登录流程状态（phone → 会话）
 type SMSLoginFlow struct {
@@ -216,8 +212,9 @@ func NewLoginManager(db *DB, pool *AccountPool, browser *BrowserService) *LoginM
 }
 
 // newLoginClient 登录专用客户端：优先浏览器桥（真实 TLS/HTTP2 指纹），否则 Go utls+h2
+// 短信验证码登录仅国内通道；海外为 Google/Z.ai OAuth（本网关靠导入，不在此自动化）
 func (lm *LoginManager) newLoginClient(proxyURL string) *UserAPIClient {
-	c := NewUserAPIClient(hostSetting(lm.db), proxyURL)
+	c := NewUserAPIClient(RegionHost(lm.db, &Account{Region: string(RegionCN)}), proxyURL)
 	if lm.browser != nil {
 		c.Bridge = lm.browser.HTTPJSON
 	}
@@ -325,6 +322,7 @@ func (lm *LoginManager) CompleteLogin(flowID, code string, group string) (*Accou
 		AtExp:         TokenExpiresAt(lr.AccessToken),
 		RtExp:         TokenExpiresAt(lr.RefreshToken),
 		Source:        "sms_login",
+		Region:        string(RegionCN), // 短信登录=国内通道
 	}
 	id, err := lm.db.UpsertAccount(a)
 	if err != nil {

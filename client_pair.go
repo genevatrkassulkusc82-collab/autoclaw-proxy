@@ -106,6 +106,7 @@ type clientPushAccount struct {
 	DeviceSpoofed int    `json:"device_spoofed"`
 	Group         string `json:"group"`
 	Source        string `json:"source"`
+	Region        string `json:"region"` // cn|oversea（空=按国内）
 }
 
 func clientCodeFromRequest(r *http.Request) string {
@@ -185,6 +186,7 @@ func (h *AdminHandler) handleClientPush(w http.ResponseWriter, r *http.Request) 
 		AtExp:         TokenExpiresAt(a.AccessToken),
 		RtExp:         TokenExpiresAt(a.RefreshToken),
 		Source:        src,
+		Region:        a.Region,
 	}
 	id, err := h.db.UpsertAccount(acct)
 	if err != nil {

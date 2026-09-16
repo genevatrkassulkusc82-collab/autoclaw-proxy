@@ -26,6 +26,7 @@
 | 出口代理 | SOCKS5 / HTTP CONNECT；按账号分组绑定；登录桥独立 `login_proxy`；出口 IP 测试 / 本机代理探测 | ✅ |
 | 管理面板 | 嵌入式 Web UI（浅色卡片 + pill 导航）：仪表盘/账号/登录/测试/密钥/模型/代理/设置/日志 | ✅ 实测 |
 | 用量观测 | 每次调用落库：账号/路由/状态/入出 tokens/TTFT/耗时/错误 | ✅ 实测 |
+| 额度/用量查询（复刻官方两界面） | 「积分详情」=上游 subscribe-info(会员/编码计划)+product-info(套餐额度目录)；「用量统计」=本地 usage_logs 聚合（per-account 明细+汇总+按模型）；账户列表带额度/会员列 | ✅ 实测 |
 
 ## 架构
 
@@ -126,6 +127,7 @@ autoclaw-client-windows-amd64.exe -server http://<服务器>:8317 -code <配对�
 | `GET /v1/models` | LLM Key | 模型目录（`?sync=1` 强制上游同步） |
 | `POST /admin/login` / `logout` / `me` / `password` | 公开/会话 | 后台会话与改密 |
 | `GET/POST /admin/accounts…`、`keys`、`proxies`、`models`、`usage`、`settings`、`test/chat` | 会话 | 管理面 |
+| `GET /admin/accounts/{id}/quota`、`/admin/accounts/quota-all`、`/admin/accounts/{id}/usage` | 会话 | 额度/用量查询 |
 
 ## 项目结构
 

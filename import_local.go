@@ -109,10 +109,17 @@ func PreviewLocalImport() *LocalImportPreview {
 }
 
 // ImportLocalAccount 从本机 AutoClaw 导入账号（真实设备身份，device_spoofed=0）
-func ImportLocalAccount(db *DB, group string) (*Account, error) {
+// region 为空时自动从 ~/.openclaw-autoclaw/openclaw.json 的 provider baseUrl 识别（国内/海外）
+func ImportLocalAccount(db *DB, group, region string) (*Account, error) {
 	paths, err := DetectLocalAutoClaw()
 	if err != nil {
 		return nil, err
+	}
+	reg := DefaultRegion
+	if strings.TrimSpace(region) != "" {
+		reg = NormalizeRegion(region)
+	} else {
+		reg = detectRegionFromOpenclaw(paths)
 	}
 	var auth struct {
 		Token        string `json:"token"`
@@ -160,6 +167,7 @@ func ImportLocalAccount(db *DB, group string) (*Account, error) {
 		AtExp:         TokenExpiresAt(at),
 		RtExp:         TokenExpiresAt(rt),
 		Source:        "local_import",
+		Region:        string(reg),
 	}
 
 	// 设备密钥对（identity/device.json，若存在且自洽则一并导入）
@@ -195,9 +203,34 @@ func ImportLocalAccount(db *DB, group string) (*Account, error) {
 	}
 	a.ID = id
 	remain := time.Until(time.Unix(a.RtExp, 0))
-	log.Printf("[import] 导入成功 account=%d user=%s phone=%s rt剩余=%.1f天",
-		id, a.UserID, maskPhone(a.Phone), remain.Hours()/24)
+	log.Printf("[import] 导入成功 account=%d user=%s phone=%s region=%s rt剩余=%.1f天",
+		id, a.UserID, maskPhone(a.Phone), reg, remain.Hours()/24)
 	return a, nil
+}
+
+// detectRegionFromOpenclaw 从 ~/.openclaw-autoclaw/openclaw.json 的 provider baseUrl 推断区域：
+// 含 autoglm.ai / z.ai → 海外，否则国内。读不到/解析失败 → 默认国内。
+func detectRegionFromOpenclaw(paths *LocalAutoClawPaths) Region {
+	raw, err := os.ReadFile(filepath.Join(paths.StateDir, "openclaw.json"))
+	if err != nil {
+		return DefaultRegion
+	}
+	var cfg struct {
+		Models struct {
+			Providers map[string]struct {
+				BaseURL string `json:"baseUrl"`
+			} `json:"providers"`
+		} `json:"models"`
+	}
+	if json.Unmarshal(raw, &cfg) != nil {
+		return DefaultRegion
+	}
+	for _, p := range cfg.Models.Providers {
+		if DetectRegionFromHost(p.BaseURL) == RegionOversea {
+			return RegionOversea
+		}
+	}
+	return DefaultRegion
 }
 
 func truncID(s string) string {

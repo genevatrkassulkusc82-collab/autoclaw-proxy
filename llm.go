@@ -39,7 +39,11 @@ var modelPrefixRe = regexp.MustCompile(`^[a-z]+_`)
 func stripModelPrefix(id string) string { return modelPrefixRe.ReplaceAllString(id, "") }
 
 // llmHeaders 组装上游请求头（openclaw.json 静态头 + 动态头，与网关 buildAutoClawRequestHeaders 对齐）
-func llmHeaders(at, routeModel string) map[string]string {
+// lang 为空时回退默认 zh-CN（海外账号传 "en"）
+func llmHeaders(at, routeModel, lang string) map[string]string {
+	if lang == "" {
+		lang = autoclawLang
+	}
 	return map[string]string{
 		"Content-Type":    "application/json",
 		"Accept":          "*/*",
@@ -51,7 +55,7 @@ func llmHeaders(at, routeModel string) map[string]string {
 		"X-Version":       autoclawAppVersion,
 		"X-Product":       "autoclaw",
 		"X-Channel":       autoclawChannel,
-		"X-Lang":          autoclawLang,
+		"X-Lang":          lang,
 		"X-Client-Type":   "pc",
 	}
 }
@@ -164,12 +168,12 @@ func (c *LLMCaller) callWithAccount(ctx context.Context, a *Account, reqModel st
 		if err != nil {
 			return nil, err
 		}
-		base := strings.TrimSuffix(hostSetting(c.db), "/") + llmProxyPath
+		base := strings.TrimSuffix(RegionHost(c.db, a), "/") + llmProxyPath
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
-		for k, v := range llmHeaders(token, route) {
+		for k, v := range llmHeaders(token, route, RegionLang(a)) {
 			req.Header.Set(k, v)
 		}
 		stream, _ := body["stream"].(bool)
@@ -326,7 +330,8 @@ func (c *LLMCaller) SyncCatalog() ([]RemoteModel, error) {
 			at = fresh
 		}
 	}
-	client := NewUserAPIClient(hostSetting(c.db), c.pool.egress.ProxyURLForAccount(a))
+	client := NewUserAPIClient(RegionHost(c.db, a), c.pool.egress.ProxyURLForAccount(a))
+	client.Lang = RegionLang(a)
 	models, err := client.FetchModelCatalog(at)
 	if err != nil {
 		return nil, err

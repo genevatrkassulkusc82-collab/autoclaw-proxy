@@ -78,7 +78,7 @@ func main() {
 	}
 
 	if *importLocal {
-		if a, err := ImportLocalAccount(db, ""); err != nil {
+		if a, err := ImportLocalAccount(db, "", ""); err != nil {
 			log.Printf("[main] 本地导入失败: %v", err)
 		} else {
 			log.Printf("[main] 本地导入成功: account=%d user=%s", a.ID, a.UserID)

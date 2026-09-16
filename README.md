@@ -163,6 +163,23 @@ autoclaw-proxy/
 - **路由由 `X-Request-Model` 头决定**，优先于 body `model`；body `model` 需去前缀（`zai_auto`→`auto`）。
 - 登录态 JWT 明文存于 `~/.openclaw-autoclaw/openclaw.json` 与 `request-headers.json`（24h，主进程自动回写）；长效凭证在 `%APPDATA%\AutoClaw\auth.json` 为 `enc:v10`（DPAPI→AES-256-GCM）。
 
+## 上游错误屏蔽（参考 dumate-proxy）
+
+上游 4xx/5xx/网络异常的**原文与内部细节只进服务端日志**，客户端只收到规范化通用错误（OpenAI 错误体）：
+
+| 上游情况 | 客户端收到 | 服务端日志 |
+|---|---|---|
+| 传输层错误（拨号/超时/DNS） | `503 upstream temporarily unreachable` | 完整拨号/地址/错误原文 |
+| 401/403 | `503 upstream authentication failed` | 上游状态+错误体+reqID |
+| 429 | `429 upstream rate limited or quota exhausted` | 同上 |
+| 5xx | `502 upstream server error (N)` | 同上 |
+| 其它 4xx | `502 upstream request failed (N)` | 同上 |
+| 流式中途 error 事件 | 不转发该 chunk（截断流） | error 原文 |
+| 无可用账号 | `503 no available account` | 池状态 |
+
+- 上游错误体中的 `requestId/logId/trace` 提取为 reqID，仅用于日志关联与客户端提示后缀，不泄漏上游地址/错误体。
+- 已实测：坏 host → 客户端 `upstream temporarily unreachable`，服务端日志保留 `dial tcp …` 全文。
+
 ## 安全与共存须知
 
 1. **rt 竞争**：导入账号与官方客户端共享同一 rt（轮换单次有效）。官方运行期间网关只读消费；主动刷新建议在官方关闭时执行。彻底隔离用独立设备身份账号。

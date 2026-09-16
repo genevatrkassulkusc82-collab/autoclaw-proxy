@@ -1,174 +1,135 @@
-# AutoClaw 海外版（z.ai）协议差异分析
+# AutoClaw 海外版（autoglm.ai / z.ai）协议差异分析
 
-> 对比对象：国内版 = 本仓库 `autoclaw-proxy` 现状（`*.zhipuai.cn`，账号 JWT 通道，AutoClaw 1.18.4）；
-> 海外版 = `autoclaw.z.ai`（Z.ai 海外品牌，AutoClaw 1.18.5）。
-> 编写时间：2026-09-15。**本次已用内置浏览器实时抓取 `autoclaw.z.ai`（落地页 + `/models/` + `_astro` JS 包 + electron-updater 清单）**，
-> 海外侧大量结论从"推断"升级为"实测"。LLM 通道签名细节仍引自 `docs/02 §5`、`docs/03 §5`（官方 1.18.4 bundle 逆向）。
+> 对比对象：国内版 = 本仓库 `autoclaw-proxy` 现状（`*.zhipuai.cn`，AutoClaw 1.18.4 实现）；
+> 海外版 = `autoclaw.z.ai` 发行的 AutoClaw 1.18.5（`isOversea=true` 构建）。
+> 编写时间：2026-09-16。**结论基于对两个官方安装包的解包逆向（非推断）**：
+> 国内 `autoclaw_1.18.5_amd64.deb`（`isOversea=false`）+ 海外 `autoclaw-1.18.5-mac.zip`（`isOversea=true`），
+> 解出 `app.asar → out/main/index.js`（9.6MB）与 `model-provider-config.json`，并实时抓取了 `autoclaw.z.ai` 落地页。
 
-## 0. 取证状态与可信度标注
+## 0. 结论速览（含对早期推断的重要修正）
 
-| 标记 | 含义 |
-|---|---|
-| ✅实测 | 本次对 `autoclaw.z.ai` 的实时抓取，或仓库代码/`docs` 已实测 |
-| ✅文档 | 仓库 `docs/02~03` 从官方 bundle 逆向并实测的协议（海外 LLM 签名通道） |
-| ⚠️推断 | 依据上述证据推出、未直接验证 |
-| ❓待核实 | 关键未知项，需海外版客户端 bundle 或抓包确认 |
+1. **海外版与国内版是同一份代码的两个构建**，由编译期常量 `isOversea` 区分（国内 `false`、海外 `true`）。
+2. **内置 LLM 通道协议两边完全相同**：同样的 `/autoclaw-proxy/proxy/autoclaw/chat/completions` 路径、同样的账号 **JWT**（`X-Authorization: Bearer`）、同样的 `X-Request-Model` 路由、同样的 `X-Harness-Type: zcode`、同样的 MD5 `X-Auth-Sign`（`APP_ID=100003`/`APP_KEY` 两构建逐字相同）、同样的 `/userapi/v1/refresh`（含 `400002→agent-refresh` 降级）。
+3. **真正的差异只有三处**：① **主机域名**（`*.zhipuai.cn` → `*.autoglm.ai`）；② **登录方式**（+86 短信 → Google / Z.ai OAuth）；③ **`X-Lang`**（`zh-CN` → `en`）。
+4. **修正早期误解**：之前推断"海外 = Coding Plan apiKey + Ed25519 签名"是**错的**。Ed25519+PoW 客户端签名是 **BYOK（用户自带 `bigmodel.cn`/`z.ai` apiKey）的可选通道**，国内外构建都有，**与内置加速通道无关**（详见 §5）。
+5. **对 `autoclaw-proxy` 的含义**：支持海外版 ≈ **换个 host**（仓库已有 `upstream_host` 设置）+ 改 `X-Lang`，其余 JWT/刷新/签名/头部全一致——**不需要实现 Ed25519 签名通道**。
 
-> **一句话结论**：海外版与国内版是**同一款 AutoClaw 的两个发行版**（同源 Electron 应用），但走**两套不同的 LLM 鉴权体系**：
-> 国内 = 账号 **JWT** 私有头 + **无签名**；海外 = **GLM Coding Plan apiKey `{id}.{secret}` + Ed25519 客户端签名 + SHA-256 PoW**（标准 PaaS v4 接口）。
-> 业务/支付层两边都用同一套 **MD5 `X-Auth-Sign`** 签名（海外支付 API `autoglm-api.autoglm.ai` 已实测带 `X-Auth-Appid/TimeStamp/Sign`）。
+## 1. 取证来源（✅ 全部实测，可复现）
 
-## 1. 核心差异对比表
-
-| 维度 | 国内版（autoclaw-proxy 现状） | 海外版（autoclaw.z.ai） | 可信度 |
+| 物料 | 来源 | 大小 | 关键产物 |
 |---|---|---|---|
-| 落地页 | `autoclaw.zhipuai.cn` | `autoclaw.z.ai`（标题 "Z.ai's Official AI Agent \| GLM-5.3-Flash"） | ✅实测 |
-| 应用版本 | 1.18.4（`userapi.go:34`） | **1.18.5**（2026-09-11 发布） | ✅实测 |
-| 更新源(electron-updater) | `autoglm.aminer.cn/autoclaw/updates` | `autoglm-public-oss.z.ai/autoclaw/updates` | ✅实测 |
-| 安装包命名 | `autoclaw-<ver>-cn.dmg` / `-cn` 后缀 | `autoclaw-1.18.5-setup.exe` / `autoclaw-1.18.5.dmg`（无 `-cn`） | ✅实测 |
-| 支付/业务 API | userapi `*.zhipuai.cn`（MD5 `X-Auth-Sign`） | `autoglm-api.autoglm.ai`（MD5 `X-Auth-Sign`，同款签名） | ✅实测 |
-| LLM 主机 | `autoglm-acceleration-api.zhipuai.cn`（`userapi.go:40`） | `api.z.ai`（候选）/ 或 `autoglm-api.autoglm.ai` | ✅文档 / ❓实测主机 |
-| LLM 路径 | `/autoclaw-proxy/proxy/autoclaw/chat/completions`（`llm.go:167-168`） | `/api/paas/v4/chat/completions` | ✅文档 / ⚠️ |
-| LLM 鉴权 | 账号 **JWT**，私有头 `X-Authorization: Bearer <JWT>`（`llm.go:46`） | **Coding Plan apiKey `{id}.{secret}`**（`Authorization`/`x-api-key`） | ✅文档 + 落地页佐证 |
-| LLM 请求签名 | **无**（`zai` provider 豁免，`docs/02 §5`） | **Ed25519 签名 + SHA-256 PoW(8bit)**，握手 `/api/paas/c1f3a7e2/v2/client` | ✅文档 |
-| 路由 | 私有头 `X-Request-Model: zai_auto`（`llm.go:48`） | ⚠️可能用 body `model`（PaaS v4 标准） | ⚠️ |
-| 登录 | **+86 短信**（`agent-send-code`/`agent-login/`） | ❓email/Google OAuth + Coding Plan（落地页 "Join now"→飞书文档） | ❓ |
-| 语言/准入头 | `X-Lang: zh-CN`、`X-Harness-Type: zcode`（必带，`llm.go:49`） | `X-Lang: en-US`⚠️、准入头❓ | ⚠️/❓ |
-| 模型 | `zai_auto`→deepseek-v4-flash、glm-5.3、glm-5.3-flash | **GLM-5.3-Flash / 5.3 / 5.2 / 5-Turbo / 5V-Turbo** | ✅实测 |
-| 部署区域 | 国内（阿里云 OSS北京、aminer.cn） | 海外（Volcengine `ap-southeast-1` 新加坡、z.ai/autoglm.ai） | ✅实测 |
-| 风控/WAF | 阿里云 WAF（`acw_tc`、307、拒 utls，`transport.go:490-503`） | ❓推断 Cloudflare 类 | ❓ |
-| 多端 | Windows 为主 | Win/Mac(intel+apple-silicon)/Linux(.deb)/Android(.apk) | ✅实测 |
+| 国内构建 | `autoglm.oss-cn-beijing.aliyuncs.com/autoclaw/updates/autoclaw_1.18.5_amd64.deb` | 299MB | `isOversea=false`，`app.asar`(308MB) |
+| 海外构建 | `autoglm-public-oss.z.ai/autoclaw/updates/autoclaw-1.18.5-mac.zip` | 628MB | `isOversea=true`，`app.asar`(310MB) |
+| 落地页 | `autoclaw.z.ai`（内置浏览器实时抓取） | — | 版本/更新源/支付 API/模型清单 |
 
-## 2. 海外版分发与基础设施（✅本次实时抓取）
+解包链：`.deb`→`ar`→`data.tar.xz`→`opt/AutoClaw/resources/app.asar`；`.zip`→`AutoClaw.app/Contents/Resources/app.asar`。
+`app.asar` 用 Python 解析 Pickle 头（无 `7z`/`asar` 工具）→ 提取 `out/main/index.js`、`package.json`、`model-provider-config.json`。
 
-从 `autoclaw.z.ai` 落地页、`/_astro/*.js` 包与 electron-updater 清单提取：
+## 2. 主机映射（✅ 两构建 `index.js` 实证）
 
-**落地页性质**：Astro 静态营销站（`/_astro/` 资源），`<html lang="en">`，仅发分析类 XHR（Volcengine/GA/Bing/Clarity），**不含 LLM API 调用**。结构化数据 `sameAs` 同时列出 `https://z.ai`、`https://x.com/Zai_org`、**`https://autoclaw.zhipuai.cn/`**——证实国内/海外落地页成对存在。
-
-**版本与更新源**（electron-updater，CORS 可读）：
-```
-海外: https://autoglm-public-oss.z.ai/autoclaw/updates/latest.yml      → version 1.18.5, autoclaw-1.18.5-setup.exe (sha512…, 2026-09-11)
-海外: https://autoglm-public-oss.z.ai/autoclaw/updates/latest-mac.yml  → autoclaw-1.18.5-mac.zip(628MB) / autoclaw-1.18.5.dmg(636MB)
-国内: https://autoglm.aminer.cn/autoclaw/updates/...
-Linux: https://autoglm.oss-cn-beijing.aliyuncs.com/autoclaw/updates/autoclaw_1.18.5_{amd64,arm64}.deb
-Android: https://autoglm.aminer.cn/autoclaw/update-apk/official/autoclaw_release.apk
-```
-
-**安装包命名规则**（`BaseLayout…js` 实测反编译）：
-```js
-// manifest: `${downloadRoot}/${mac?"latest-mac.yml":"latest.yml"}?t=<ts-rand>`
-// 下载路径: const r = isCN ? "-cn" : "";
-//   mac(apple-silicon): `${root}/autoclaw-${ver}${r}.dmg`
-//   mac(intel):         `${root}/autoclaw-${ver}-x64${r}.dmg`
-//   windows:            `${root}/autoclaw-${ver}-setup${r}.exe`
-```
-即**国内构建带 `-cn` 后缀，海外不带**——这是发行版区分的硬证据。
-
-**支付/业务 API**（`pay-sign.DjyFK-JG.js` 实测）：
-```
-const et = "https://autoglm-api.autoglm.ai";   // 海外支付/订单 API
-请求头含: X-Auth-Appid / X-Auth-TimeStamp / X-Auth-Sign   // 与国内 userapi 同款 MD5 签名族
-```
-说明海外**业务层签名沿用 MD5 `X-Auth-Sign`**（`docs/03 §1.2` 同款：`md5(APP_ID&ts&APP_KEY)`），与 LLM 层的 Ed25519 签名是两套独立体系。
-
-**海外模型清单**（`/models/` 实测）：GLM-5.3-Flash（NEW 2026.08，多模态轻量）、GLM-5.3（2026.08 旗舰/agentic coding）、GLM-5.2（2026.06 长上下文）、GLM-5-Turbo（2026.03 agent 工作流）、GLM-5V-Turbo（2026.04 视觉）。营销主打 "**Use your GLM Coding Plan in AutoClaw**"、新用户注册送 1 亿 GLM-5.3-Flash tokens、Individual/Team 套餐——**直接佐证海外 LLM 鉴权 = GLM Coding Plan apiKey**。
-
-## 3. 国内版协议回顾（基线，✅代码+实测）
-
-详见 `docs/01-llm-api.md`。主链路：
-- 端点 `POST https://autoglm-acceleration-api.zhipuai.cn/autoclaw-proxy/proxy/autoclaw/chat/completions`
-- 鉴权 私有头 `X-Authorization: Bearer <账号JWT>`（HS256,24h,claims含user_id/device_id/source_id），**非标准 Authorization**
-- 路由 `X-Request-Model: zai_auto`（优先于 body model）；body model = 路由ID去前缀（`llm.go:36-39`）
-- 准入 `X-Harness-Type: zcode` 必带（缺失→误导性 `500 invalid request body`）
-- 静态头 `X-Product:autoclaw`/`X-Client-Type:pc`/`X-Tm:win`/`X-Version:1.18.4`/`X-Channel:official`/`X-Lang:zh-CN`（`llm.go:42-57`）
-- 刷新 `POST /userapi/v1/refresh`，MD5 `X-Auth-Sign`，rt 单次轮换；401→刷新重放一次（`llm.go:190-202`）
-- 登录 +86 短信；**LLM 通道不做客户端签名**（`getAutoClawClientSignTarget()` 对 `provider==="zai"` 返回 null）
-
-## 4. 海外版 LLM 协议（✅文档 bundle 逆向 + 落地页佐证）
-
-### 4.1 API 面（⚠️/❓主机待实测）
-海外 LLM 大概率是标准 **PaaS v4** OpenAI 兼容接口 `https://api.z.ai/api/paas/v4/chat/completions`
-（依据 `docs/01:19`：官方补丁把 `api.z.ai/api/paas/v4`、`open.bigmodel.cn/api/paas/v4` 上游替换为加速代理）。
-落地页实测到的海外主机为 `autoglm-public-oss.z.ai`（更新）与 `autoglm-api.autoglm.ai`（支付）；
-**LLM 真实主机未从落地页暴露**（在 app bundle 内），候选 `api.z.ai` 或 `autoglm-api.autoglm.ai`，❓待抓包确认。
-
-### 4.2 鉴权：GLM Coding Plan apiKey（✅落地页佐证 + 文档）
-凭证形态 `{id}.{secret}`，经 `Authorization: Bearer {id}.{secret}` 或 `x-api-key` 携带（`docs/02 §5`）。
-落地页 "Use your GLM Coding Plan in AutoClaw" + Individual/Team 套餐 ✅佐证。这是与国内"账号 JWT"**不同的凭证类型**（apiKey 长期密钥 vs JWT 24h 短令牌）。
-
-### 4.3 Ed25519 客户端签名 + PoW（✅文档已证实算法）
-
-海外侧与国内侧**最实质的差异**。常量与流程取自 `docs/02 §5`/`docs/03 §5`：
-
-**常量**
-```
-KDF_SALT="WD_CLIENT_SIGN_KDF_SALT"  INFO_HANDSHAKE="getSignKey_hmac"  INFO_PRIV="ed25519_priv"
-APP_ID="autoclaw"  SIGN_VERSION="1.18.1"  POW_BITS=8  POW_MAX_ITER=5,000,000  KEY_TTL=6h
-HANDSHAKE_PATH=/api/paas/c1f3a7e2/v2/client
-```
-**握手取私钥**
-```
-reqKek=HKDF-SHA256(secret,SALT,INFO_HANDSHAKE,32B)
-sig=base64(HMAC-SHA256(reqKek,"get_sign_key\n"+id+"\n"+ts+"\n"+nonce))
-POST {origin}/api/paas/c1f3a7e2/v2/client  Authorization:Bearer {id}.{secret}
-  body{apiKey,ts,nonce,sig} → {code:200,data:{privateCipher}}
-kek=HKDF-SHA256(secret,SALT,INFO_PRIV,32B)
-privPK8=AES-256-GCM-Decrypt(kek,IV=base64decode(privateCipher)[0:12],ct=[12:-16],tag=[-16:],AAD=id)
-Ed25519PrivateKey=ParsePKCS8(privPK8)   // 缓存6h，失败冷却10min
-```
-**每请求签名 + PoW**
-```
-message=id+"\n"+ts+"\n"+SIGN_VERSION+"\n"+sessionId+"\n"+nonce
-X-Client-Sig=base64(Ed25519Sign(priv,message)); X-Client-Id=id; X-Client-Ts=ts
-X-Client-Version="1.18.1"; X-Client-Nonce=nonce; X-Session-Id=sessionId
-challenge=SHA256(id+"\n"+APP_ID+"\n"+sessionId+"\n"+ts).hex[:32]
-找 candidate 使 SHA256(challenge+"\n"+candidate) 前导零bit≥8 → X-Client-Pow=candidate (平均256次,<1ms)
-```
-**401 + `VERIFY_*` 自愈**：rekey 类（`SIGNATURE_INVALID`/`APIKEY_EXPIRED`）→重握手重签一次；hard 类（`POW_*`/`TS_OUT_OF_WINDOW`/`MISSING_FIELD`/`INVALID_FORMAT`/`PROTOCOL_ERROR`/`APIKEY_DISABLED`）→停签30min；未知码→10min内≥2次才停签。
-
-### 4.4 登录 / 账号获取（❓）
-国内 +86 短信。海外落地页 "Join now"→飞书文档（Coding Plan 购买），"Download"→安装包；**未暴露登录流程**。
-推断 email/Google OAuth + Coding Plan 绑定，❓待 app 抓包确认。
-
-### 4.5 风控 / TLS（❓）
-国内阿里云 WAF（拒 utls，`transport.go:490-503`）。海外更可能 Cloudflare 类；utls 指纹与 SOCKS5/HTTP CONNECT 出口能力可复用，预设需实测调整。
-
-## 5. 对 autoclaw-proxy 的改造点（引用真实代码行）
-
-底层密码学**大部分已具备**：`crypto.go` 已 import `crypto/ed25519`、`crypto/sha256`、`crypto/aes`、`crypto/cipher`、`crypto/x509`，有 `GenerateDeviceIdentity()`(`crypto.go:47`)、AES-GCM(`crypto.go:193-243`)。需补 HKDF（`golang.org/x/crypto/hkdf`，go.mod 已含 x/crypto）、HMAC（`crypto/hmac`）、Ed25519 签名（标准库）、PoW（SHA-256 计数）。
-
-| # | 文件 | 改动 |
+| 用途 | 国内（`isOversea=false`） | 海外（`isOversea=true`） |
 |---|---|---|
-| 1 | `userapi.go:29-45`/`llm.go:167-168` | 把「主机+路径+鉴权」抽象为 provider；新增 z.ai provider：host=`api.z.ai`(❓待确认)、path=`/api/paas/v4`、apiKey 鉴权 |
-| 2 | 新增 `clientsign.go` | 实现 §4.3：HKDF+HMAC 握手→AES-256-GCM 解封 Ed25519 私钥(AAD=id)→每请求签名+PoW(8bit)+`VERIFY_*` 自愈；私钥6h缓存、失败10min冷却 |
-| 3 | `llm.go:42-57`(`llmHeaders`) | 海外头：去 `X-Authorization`/`X-Harness-Type`/`X-Request-Model`(⚠️待核实)，注入 `Authorization:Bearer {id}.{secret}` + `X-Client-Sig/Id/Ts/Version/Nonce` + `X-Client-Pow` + `X-Session-Id`；`X-Lang:en-US` |
-| 4 | `account.go` | 账号模型增 "Coding Plan apiKey `{id}.{secret}`" 类型（区别 JWT）；失效/重握手逻辑 |
-| 5 | `transport.go` | 海外出口 utls 指纹预设 + 复用 SOCKS5/HTTP CONNECT（`ClientForProxy`，`llm.go:180` 已用） |
-| 6 | `database.go` | accounts 表增 provider/region 字段与 apiKey 存储 |
+| **LLM 代理**(prod) | `autoglm-acceleration-api.zhipuai.cn/autoclaw-proxy/proxy/autoclaw` | **`autoglm-api.autoglm.ai/autoclaw-proxy/proxy/autoclaw`** |
+| LLM 代理(pre) | `autoglm-pre-api.zhipuai.cn/...` | `autoglm-pre-api.autoglm.ai/...` |
+| userapi(prod) | `autoglm-api.zhipuai.cn` | `autoglm-api.autoglm.ai` |
+| userapi(accel/test) | `autoglm-acceleration-api.zhipuai.cn` / `autoglm-inner-3.zhipuai.cn` | `autoglm-api.autoglm.ai` / `autoglm-test-api.autoglm.ai` |
+| cloud/relay | `autoglm-acceleration-api.zhipuai.cn` | `autoglm-api.autoglm.ai` |
+| agent-common(文件/OCR) | `autoglm-acceleration-api.zhipuai.cn/agent-common` | `autoglm-api.autoglm.ai/agent-common` |
+| 登录回调 | 无（短信） | `autoglm-api.autoglm.ai/userapi/oauth/google/callback` |
+| 更新源 | `autoglm.aminer.cn` / `oss-cn-beijing` | `autoglm-public-oss.z.ai` |
+| 支付 API | userapi（`*.zhipuai.cn`） | `autoglm-api.autoglm.ai`（落地页 `pay-sign.js`） |
 
-> 注：`docs/02 §5` 明确签名"仅当 host∈{bigmodel.cn,z.ai} 且带 `{id}.{secret}` apiKey 时启用"。海外是否真启用、握手路径/常量是否一致，**编码前务必先抓包验证**（§6）。
+海外构建里 `getZaiProxyBaseUrl$1()` / `getUserApiHost()` / `getApiRequestHost()` / `getCloudServiceHost()` **全部硬编码返回 `*.autoglm.ai`**（zhipuai.cn 分支被编译期消除）。证据：
+```js
+// 海外 index.js
+function getZaiProxyBaseUrl$1(){ const suffix="/autoclaw-proxy/proxy/autoclaw";
+  { if(isPre) return `https://autoglm-pre-api.autoglm.ai${suffix}`;
+    return `https://autoglm-api.autoglm.ai${suffix}`; } }
+function getUserApiHost(env=getEnv()){ switch(env){
+  case "development": case "test": return "https://autoglm-test-api.autoglm.ai";
+  case "pre": return "https://autoglm-pre-api.autoglm.ai";
+  default: return "https://autoglm-api.autoglm.ai"; } }
+const isOversea = true;            // 国内构建此处为 false
+let currentLang = "en";            // 国内构建为 "zh-CN"
+const APP_ID="100003", APP_KEY="38d2391985e2369a5fb8227d8e6cd5e5";  // 两构建相同
+```
 
-## 6. 待核实清单（需海外版 bundle 或抓包）
+## 3. 内置 LLM 通道逐项对比（✅ 实证）
 
-1. 海外 **LLM 真实主机与路径**：`api.z.ai/api/paas/v4` 还是 `autoglm-api.autoglm.ai`？是否仍有 autoclaw 专属加速代理路径？
-2. 海外是否真启用 **Ed25519+PoW** 客户端签名？握手是否仍 `/api/paas/c1f3a7e2/v2/client`？常量是否随 1.18.5 变化（`SIGN_VERSION` 是否升到 1.18.5）？
-3. 海外**登录流程**（email/OAuth？是否铸 JWT 还是纯 apiKey）。
-4. 海外**模型路由**方式（`X-Request-Model` 头 vs body `model`）与模型 ID 映射（GLM-5.3-Flash 等对应的路由 ID）。
-5. 海外是否仍有 `X-Harness-Type: zcode` 类准入头；`X-Lang`/`X-Channel`/`X-Product` 取值。
-6. 海外风控类型与 TLS 指纹要求。
+| 维度 | 国内 | 海外 | 是否相同 |
+|---|---|---|---|
+| 端点路径 | `/autoclaw-proxy/proxy/autoclaw/chat/completions` | 同 | ✅相同 |
+| 鉴权 | `X-Authorization: Bearer <账号JWT>`（HS256,24h） | 同 | ✅相同 |
+| 路由 | `X-Request-Model`（优先于 body model），前缀 `zai_/zaicoding_/openrouter_`，`toModelProxyBodyModelId=replace(/^[a-z]+_/,"")` | 同 | ✅相同 |
+| 准入头 | `X-Harness-Type: zcode`（必带） | 同 | ✅相同 |
+| 静态头 | `X-Product:autoclaw`/`X-Client-Type:pc`/`X-Tm:getPlatformTm()`/`X-Version:app.getVersion()`/`X-Channel`/`x_trace_id:autoclaw-desktop` | 同 | ✅相同 |
+| 语言头 | `X-Lang: zh-CN` | `X-Lang: en`（`getLang()`） | ❌不同 |
+| userapi 签名 | `X-Auth-Sign=md5("100003&<ts>&38d2…5e5")` | 同（常量逐字相同） | ✅相同 |
+| 刷新 | `POST /userapi/v1/refresh`，`400002`→`/userapi/v1/agent-refresh` | 同 | ✅相同 |
+| 凭证存储 | `enc:v10`（Electron safeStorage：DPAPI→AES-256-GCM） | 同框架 | ✅相同（⚠️海外账号未实测） |
+| 模型清单 | 远端 `{proxy}/autoclaw-model-config` 下发 | 同机制 | ✅相同（海外具体 ID 未拉取） |
+| 线格式 | 标准 OpenAI Chat Completions + `reasoning_content` | 同 | ✅相同 |
 
-**取证方式**：(A) 下载海外安装包 `autoclaw-1.18.5-setup.exe`/`.dmg`（约 600MB，`autoglm-public-oss.z.ai/autoclaw/updates`），解包 `app.asar` 逆向 `getZaiProxyBaseUrl`/`getAutoClawClientSignTarget`/握手常量；(B) 运行海外版抓包（Fiddler/mitmproxy）观测真实 LLM 请求头与握手。
+> 即：**海外内置通道 = 国内通道，把 `autoglm-acceleration-api.zhipuai.cn` 换成 `autoglm-api.autoglm.ai`、`X-Lang` 换 `en`**。
 
-## 7. 附录：实时抓取记录（2026-09-15，内置浏览器 IAB）
+## 4. 登录差异（最大的工程差异，✅ 实证）
 
-| 目标 | 结果 |
-|---|---|
-| `autoclaw.z.ai/` | ✅加载，标题 "AutoClaw - Z.ai's Official AI Agent \| GLM-5.3-Flash Now Live"，Astro 静态站 |
-| `_astro/BaseLayout…js` | ✅提取更新源/安装包命名规则/版本 1.18.5/`-cn` 后缀逻辑 |
-| `_astro/pay-sign…js` | ✅提取支付 API `autoglm-api.autoglm.ai` + `X-Auth-Appid/TimeStamp/Sign` |
-| `autoglm-public-oss.z.ai/.../latest.yml` `latest-mac.yml` | ✅CORS 可读，version 1.18.5，exe/dmg/zip + sha512 + 2026-09-11 |
-| `autoclaw.z.ai/models/` | ✅模型清单 GLM-5.3-Flash/5.3/5.2/5-Turbo/5V-Turbo |
-| 落地页 XHR | 仅分析埋点（`gator.uba.ap-southeast-1.volces.com`、GA、Bing、Clarity），无 LLM API |
+| | 国内 | 海外 |
+|---|---|---|
+| 主流程 | +86 短信：`/userapi/v1/agent-send-code` → `/userapi/v1/agent-login/` | **Google OAuth** + **Z.ai OAuth** |
+| 相关常量 | `phoneCodeLogin`/`sendCode` | `GOOGLE_WEB_OAUTH_CALLBACK_PROD_URL`、`AUTH_OVERSEA_GOOGLE_OAUTH_URL`、`AUTH_OVERSEA_ZAI_OAUTH_URL`、`AUTH_OVERSEA_CAPTCHA_CONFIG` |
+| 验证码 | 阿里云 WAF（`acw_tc`/307） | 海外 captcha（`auth:oversea-captcha-config`） |
 
-> 早期 WebFetch/浏览器对 `autoclaw.z.ai` 超时系瞬时/加载慢；改用已打开标签页 + 轮询 `readyState` 后稳定抓取。
-> `autoclaw.z.ai` 落地页**不含 LLM 协议**，真实 LLM 主机/签名仍需 §6 (A)/(B) 取证。
+注：短信登录函数（`agent-send-code`/`agent-login/`）在海外 bundle 中**仍存在**（共享代码），但海外主流程走 OAuth。
+**对代理的含义**：OAuth 自动化比短信难；但**账号导入不受影响**——海外版登录后 JWT 同样落 `~/.openclaw-autoclaw/openclaw.json`、`request-headers.json`，格式一致，`import_local.go` 可直接复用，只需把该账号的 host 指向 `autoglm-api.autoglm.ai`。
+
+## 5. BYOK 第三方 provider 与 Ed25519 客户端签名（澄清：与国内/海外差异**无关**）
+
+`model-provider-config.json`（两构建同款）列出**用户可自带的第三方 provider**：
+```
+zhipu-direct      openai=https://open.bigmodel.cn/api/paas/v4         anthropic=…/api/anthropic
+zhipu-codingPlan  openai=https://open.bigmodel.cn/api/coding/paas/v4  (accessType=codingPlan)
+deepseek-direct   https://api.deepseek.com
+kimi-direct/codingPlan, minimax-direct …
+```
+海外对应 host 为 `api.z.ai/api/paas/v4`、`api.z.ai/api/coding/paas/v4`。
+
+当用户用 `{id}.{secret}` 形态 apiKey 连接 host ∈ `{bigmodel.cn, z.ai}` 的 provider 时，启用 **Ed25519 + PoW 客户端签名**（算法见 `docs/02 §5`：握手 `/api/paas/c1f3a7e2/v2/client`、`X-Client-Sig/Id/Ts/Version/Nonce/Pow`）。bundle 注释原文：
+> "后缀匹配。国内 `open.bigmodel.cn`/`dev.bigmodel.cn`，海外 `api.z.ai` —— 两地的握手路径相同，握手地址按业务请求同源推导，因此只需放行域名即可两地通用。"
+> `AUTOCLAW_CLIENT_SIGN_DEFAULT_HOSTS = ["bigmodel.cn","z.ai"]`
+
+**关键**：`getAutoClawClientSignTarget()` 对内置 `zai`/autoclaw 加速通道返回 null（不签名）。所以 Ed25519 签名是 **BYOK 直连第三方/Coding Plan 的可选特性，国内外构建都有**，不是"海外 vs 国内"的差异，也不是内置 LLM 通道所需。落地页 "Use your GLM Coding Plan in AutoClaw" 指的就是这条 BYOK 增益路径。
+
+## 6. 对 autoclaw-proxy 的改造点（修正后，大幅简化）
+
+| # | 文件 | 改动 | 难度 |
+|---|---|---|---|
+| 1 | `account.go:185-190`(`hostSetting`)、`llm.go:167` | host 改为 **per-account/region**：海外账号 → `https://autoglm-api.autoglm.ai`（仓库已有全局 `upstream_host` 设置，扩成按账号即可） | 低 |
+| 2 | `userapi.go:36`(`autoclawLang="zh-CN"`)、`llm.go:54` | `X-Lang` 改为 per-region：海外 `en` | 低 |
+| 3 | `userapi.go:34`(`autoclawAppVersion="1.18.4"`) | 可选升到 `1.18.5`（`X-Version`，疑似不严格校验） | 低 |
+| 4 | `import_local.go` | 海外安装的同路径 `~/.openclaw-autoclaw/` JWT 直接可导入；导入时标记 `region=overseas` | 低 |
+| 5 | `database.go` accounts 表 | 增 `region`/`provider_host` 字段 | 低 |
+| 6 | `account.go`(`LoginManager`) | 海外 OAuth 登录自动化（**难，建议先不做**，靠导入海外版已登录账号） | 高/可选 |
+| — | ~~`clientsign.go`~~ | **不需要**（除非另行支持 BYOK Coding Plan，那是独立 feature） | — |
+
+> 一句话：**让 autoclaw-proxy 支持海外版，核心就是"按账号切 host + 切 X-Lang"，JWT/刷新/MD5 签名/请求头全部复用现有实现。**
+
+## 7. 待核实 / 未覆盖（需海外账号实测）
+
+1. 海外账号 JWT 的 claims 结构是否与国内完全一致（同 codebase，大概率一致，未用真实海外账号验证）。
+2. 海外 `autoclaw-model-config` 实际下发的模型路由 ID 清单（落地页营销名为 GLM-5.3-Flash/5.3/5.2/5-Turbo/5V-Turbo，对应路由 ID 未拉取）。
+3. 海外端点是否真的接受相同 `APP_ID/APP_KEY` 的 MD5 签名（bundle 常量相同，但未对 `autoglm-api.autoglm.ai` 发实测请求）。
+4. 海外风控/TLS 指纹（`autoglm.ai` 是否在 Cloudflare 后、是否拒 utls），`transport.go` 指纹预设需实测调整。
+5. 海外 OAuth 登录能否被代理自动化（或是否只能靠导入）。
+
+**进一步取证方式**：(A) 注册/登录一个海外账号，用 `autoclaw-proxy -import-local` 导入其 JWT，把 `upstream_host` 设为 `https://autoglm-api.autoglm.ai` 直接实测；(B) 运行海外版抓包（mitmproxy）观测真实请求头与 host。
+
+## 8. 附录：实测证据片段
+
+**版本/发行**：两构建 `package.json` 均 `name=autoclaw, version=1.18.5`；海外更新清单 `latest.yml`/`latest-mac.yml` 标 `releaseDate 2026-09-11`；安装包命名国内带 `-cn` 后缀、海外不带（`BaseLayout.js` 反编译：`const r = isCN ? "-cn" : ""`）。
+
+**落地页**（`autoclaw.z.ai`，Astro 静态站）：标题 "AutoClaw - Z.ai's Official AI Agent | GLM-5.3-Flash Now Live"；`sameAs` 含国内对应站 `autoclaw.zhipuai.cn`；营销 "Use your GLM Coding Plan in AutoClaw"、新用户送 1 亿 GLM-5.3-Flash tokens；分析埋点走 Volcengine `ap-southeast-1`（新加坡）。`pay-sign.js` → `https://autoglm-api.autoglm.ai`，带 `X-Auth-Appid/TimeStamp/Sign`（同 MD5 签名族）。
+
+**webview 白名单**（海外构建）：`["zhipuai.cn","z.ai","autoglm.ai","aminer.cn","stripe.com", …]`；可信远程文件后缀含 `.autoglm.ai`/`.autoglm.com`/`.zhipuai.cn`。
+
+> 早期 WebFetch/浏览器对 `autoclaw.z.ai` 超时系加载慢/瞬时；改用已打开标签 + 轮询 `readyState` 后稳定抓取。落地页不含 LLM 协议，真实主机/签名由 §1 的安装包逆向确认。

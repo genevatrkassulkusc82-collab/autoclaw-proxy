@@ -113,17 +113,31 @@ func (h *OpenAIHandler) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	start := time.Now()
 	result, err := h.llm.ChatCompletions(r.Context(), body, accountID, strategy)
 	if err != nil {
-		status := 502
+		// 上游/内部错误：细节只进日志，客户端收屏蔽后的通用错误
+		log.Printf("[openai] chat error model=%s: %v", reqModel, err)
+		status := http.StatusBadGateway
 		errType := "upstream_error"
-		msg := err.Error()
-		if me, ok := err.(*ModelError); ok {
-			status, errType, msg = 404, "invalid_request_error", me.Error()
-		} else if err == errNoAccount {
-			status, errType = 429, "no_available_account"
-		} else if strings.Contains(msg, "需要重新登录") || strings.Contains(msg, "needs_login") {
-			status, errType = 401, "account_unavailable"
+		msg := "upstream request failed"
+		switch e := err.(type) {
+		case *ModelError:
+			status, errType, msg = http.StatusNotFound, "invalid_request_error", e.Error()
+		case *upstreamError:
+			status, errType, msg = clientStatusForUpstream(e.code), "upstream_error", e.msg
+		case *errAccountCooldown:
+			// 账号冷却/限流/鉴权失效：统一 503/429 通用提示，不暴露上游细节
+			if e.reason == "429" {
+				status, msg = http.StatusTooManyRequests, "upstream rate limited or quota exhausted"
+			} else {
+				status, msg = http.StatusServiceUnavailable, "upstream temporarily unavailable"
+			}
+		default:
+			if err == errNoAccount {
+				status, errType, msg = http.StatusServiceUnavailable, "upstream_error", "no available account"
+			} else if strings.Contains(err.Error(), "需要重新登录") || strings.Contains(err.Error(), "needs_login") {
+				status, msg = http.StatusServiceUnavailable, "upstream authentication failed"
+			}
 		}
-		h.db.InsertUsage(&UsageLog{Model: reqModel, Status: status, Error: truncate(msg, 400),
+		h.db.InsertUsage(&UsageLog{Model: reqModel, Status: status, Error: truncate(err.Error(), 400),
 			LatencyMs: time.Since(start).Milliseconds()})
 		openaiError(w, status, errType, msg)
 		return
@@ -142,12 +156,16 @@ func (h *OpenAIHandler) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	}
 
 	if result.Resp.StatusCode != http.StatusOK {
+		// 防御性：上游非 200 原文只进日志，客户端收屏蔽错误（正常路径 llm 已屏蔽）
 		raw, _ := io.ReadAll(io.LimitReader(result.Resp.Body, 64<<10))
+		result.Resp.Body.Close()
+		reqID := extractUpstreamReqID(raw)
+		log.Printf("[openai] upstream %d reqID=%s model=%s: %s", result.Resp.StatusCode, reqID, reqModel, truncate(string(raw), 300))
 		usage.Error = truncate(string(raw), 400)
+		usage.Status = result.Resp.StatusCode
 		h.db.InsertUsage(usage)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(result.Resp.StatusCode)
-		w.Write(raw)
+		ue := sanitizeUpstreamError(result.Resp.StatusCode, reqID)
+		openaiError(w, clientStatusForUpstream(result.Resp.StatusCode), "upstream_error", ue.msg)
 		return
 	}
 
@@ -194,6 +212,30 @@ func (h *OpenAIHandler) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	ttft := false
 	for scanner.Scan() {
 		line := scanner.Bytes()
+		// 先解析 data 行：上游中途 error 事件只记日志、不转发（屏蔽上游错误体）
+		if len(line) > 6 && string(line[:6]) == "data: " {
+			payload := strings.TrimSpace(string(line[6:]))
+			if payload != "" && payload != "[DONE]" {
+				var probe struct {
+					Error json.RawMessage `json:"error"`
+					Usage *struct {
+						PromptTokens     int64 `json:"prompt_tokens"`
+						CompletionTokens int64 `json:"completion_tokens"`
+					} `json:"usage"`
+				}
+				if json.Unmarshal([]byte(payload), &probe) == nil {
+					if probe.Error != nil {
+						log.Printf("[openai] upstream stream error model=%s: %s", reqModel, truncate(payload, 300))
+						usage.Error = truncate(payload, 300)
+						break // 不转发错误 chunk
+					}
+					if probe.Usage != nil {
+						usage.PromptTok = probe.Usage.PromptTokens
+						usage.CompleteTok = probe.Usage.CompletionTokens
+					}
+				}
+			}
+		}
 		// 原样转发（含空行分隔符）
 		w.Write(line)
 		w.Write([]byte("\n"))
@@ -201,22 +243,6 @@ func (h *OpenAIHandler) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		if !ttft && len(line) > 6 {
 			ttft = true
 			usage.TtftMs = time.Since(start).Milliseconds()
-		}
-		// 旁路解析 usage（stream_options.include_usage 末段 chunk）
-		if len(line) > 6 && string(line[:6]) == "data: " {
-			payload := strings.TrimSpace(string(line[6:]))
-			if payload != "" && payload != "[DONE]" {
-				var chunk struct {
-					Usage *struct {
-						PromptTokens     int64 `json:"prompt_tokens"`
-						CompletionTokens int64 `json:"completion_tokens"`
-					} `json:"usage"`
-				}
-				if json.Unmarshal([]byte(payload), &chunk) == nil && chunk.Usage != nil {
-					usage.PromptTok = chunk.Usage.PromptTokens
-					usage.CompleteTok = chunk.Usage.CompletionTokens
-				}
-			}
 		}
 	}
 	usage.LatencyMs = time.Since(start).Milliseconds()

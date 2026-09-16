@@ -183,8 +183,9 @@ func (c *LLMCaller) callWithAccount(ctx context.Context, a *Account, reqModel st
 
 	resp, err := doCall(at)
 	if err != nil {
-		_ = c.db.BumpAccountFailure(a.ID, err.Error())
-		return nil, err
+		log.Printf("[llm] account=%d transport error: %v", a.ID, err)
+		_ = c.db.BumpAccountFailure(a.ID, "transport: "+err.Error())
+		return nil, sanitizeUpstreamError(0, "")
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
@@ -197,7 +198,8 @@ func (c *LLMCaller) callWithAccount(ctx context.Context, a *Account, reqModel st
 		}
 		resp, err = doCall(newAT)
 		if err != nil {
-			return nil, err
+			log.Printf("[llm] account=%d transport error (after refresh): %v", a.ID, err)
+			return nil, sanitizeUpstreamError(0, "")
 		}
 	}
 
@@ -221,6 +223,14 @@ func (c *LLMCaller) callWithAccount(ctx context.Context, a *Account, reqModel st
 		_ = c.db.BumpAccountFailure(a.ID, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200)))
 		c.pool.MarkCooldown(a, 30*time.Second, fmt.Sprintf("上游 HTTP %d", resp.StatusCode))
 		return nil, &errAccountCooldown{reason: fmt.Sprintf("上游 HTTP %d", resp.StatusCode)}
+	case resp.StatusCode != http.StatusOK:
+		// 未处理的非 200（400/403/404 等）：原文只进日志，客户端收屏蔽错误
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		reqID := extractUpstreamReqID(raw)
+		log.Printf("[llm] account=%d upstream %d reqID=%s: %s", a.ID, resp.StatusCode, reqID, truncate(string(raw), 300))
+		_ = c.db.BumpAccountFailure(a.ID, fmt.Sprintf("HTTP %d reqID=%s", resp.StatusCode, reqID))
+		return nil, sanitizeUpstreamError(resp.StatusCode, reqID)
 	}
 
 	return &LLMResult{Resp: resp, Account: a, Route: route, Attempts: 1}, nil

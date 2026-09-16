@@ -599,3 +599,33 @@ async function loadUsage() {
       || '<tr><td colspan="10"><div class="empty"><p>暂无记录</p></div></td></tr>';
   } catch (e) {}
 }
+
+// ---- 本机设备身份重置（供官方手动登录新设备） ----
+
+async function resetDevice() {
+  if (!confirm('将重新生成官方 AutoClaw 的本机设备身份并移走旧登录态（自动备份）。
+请先完全退出官方 AutoClaw。
+之后打开官方客户端手动登录（新设备），再回本页导入。
+继续？')) return;
+  try {
+    const r = await api('/admin/device/reset', { method: 'POST' });
+    toast('设备身份已重置：' + (r.new_device_id || '').slice(0, 12) + '…');
+    alert('重置完成。
+旧 deviceId: ' + (r.old_device_id || '(无)') + '
+新 deviceId: ' + r.new_device_id + '
+备份: ' + r.backupDir + '
+
+现在打开官方 AutoClaw 手动登录（将以新设备绑定），登录后回本页「导入本机登录态」。');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function restoreDevice() {
+  let list = [];
+  try { list = (await api('/admin/device/backups')).backups || []; } catch (e) { toast(e.message, 'error'); return; }
+  if (!list.length) return toast('暂无设备备份', 'error');
+  const name = prompt('可恢复的备份（输入名称）:
+' + list.join('
+'), list[list.length - 1]);
+  if (!name) return;
+  try { await api('/admin/device/restore', { method: 'POST', body: { name } }); toast('已恢复备份 ' + name); } catch (e) { toast(e.message, 'error'); }
+}

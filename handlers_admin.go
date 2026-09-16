@@ -20,11 +20,12 @@ type AdminHandler struct {
 	login   *LoginManager
 	browser *BrowserService
 	auth    *AuthManager
+	dataDir string
 }
 
 // NewAdminHandler 创建
-func NewAdminHandler(db *DB, pool *AccountPool, llm *LLMCaller, login *LoginManager, browser *BrowserService, auth *AuthManager) *AdminHandler {
-	return &AdminHandler{db: db, pool: pool, llm: llm, login: login, browser: browser, auth: auth}
+func NewAdminHandler(db *DB, pool *AccountPool, llm *LLMCaller, login *LoginManager, browser *BrowserService, auth *AuthManager, dataDir string) *AdminHandler {
+	return &AdminHandler{db: db, pool: pool, llm: llm, login: login, browser: browser, auth: auth, dataDir: dataDir}
 }
 
 // Register 注册管理路由（除 ping/login 外全部需会话）
@@ -62,6 +63,10 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/browser/status", a(h.handleBrowserStatus))
 	mux.HandleFunc("POST /admin/browser/fingerprint-check", a(h.handleBrowserCheck))
 	mux.HandleFunc("POST /admin/test/chat", a(h.handleTestChat))
+	// 本机设备身份重置（供官方手动登录新设备）
+	mux.HandleFunc("POST /admin/device/reset", a(h.handleDeviceReset))
+	mux.HandleFunc("GET /admin/device/backups", a(h.handleDeviceBackups))
+	mux.HandleFunc("POST /admin/device/restore", a(h.handleDeviceRestore))
 	// LLM API Key 管理（Key 仅用于 /v1/*，不提供管理面访问）
 	mux.HandleFunc("GET /admin/keys", a(h.handleListKeys))
 	mux.HandleFunc("POST /admin/keys", a(h.handleCreateKey))
@@ -503,6 +508,36 @@ func (h *AdminHandler) handleToggleKey(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	if err := h.auth.DeleteAPIKey(r.PathValue("id")); err != nil {
 		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"ok": true})
+}
+
+// ---- 本机设备身份重置 ----
+
+func (h *AdminHandler) handleDeviceReset(w http.ResponseWriter, r *http.Request) {
+	rep, err := ResetLocalDeviceIdentity(h.dataDir)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, rep)
+}
+
+func (h *AdminHandler) handleDeviceBackups(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"backups": ListDeviceBackups(h.dataDir)})
+}
+
+func (h *AdminHandler) handleDeviceRestore(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		writeErr(w, 400, "缺少备份名")
+		return
+	}
+	if err := RestoreLocalDeviceIdentity(h.dataDir, req.Name); err != nil {
+		writeErr(w, 400, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"ok": true})

@@ -96,7 +96,7 @@ func main() {
 	mux := http.NewServeMux()
 	openai := NewOpenAIHandler(db, llm, pool, auth)
 	openai.Register(mux)
-	admin := NewAdminHandler(db, pool, llm, login, browser, auth)
+	admin := NewAdminHandler(db, pool, llm, login, browser, auth, *dataDir)
 	admin.Register(mux)
 
 	// 嵌入式 Web UI（index.html + /web/static/*）

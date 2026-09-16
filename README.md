@@ -18,6 +18,7 @@
 | 自持 rt 刷新 at | `/userapi/v1/refresh`（MD5 签名）+ 400002 降级 `agent-refresh`；rt 轮换即持久化 | ✅ 协议已验证 |
 | 模型同步 | 上游 `autoclaw-model-config` 同步（`?sync=1` 强制）；路由 ID + 短名双暴露；内置兜底目录 | ✅ 实测 |
 | 本地账号导入 | 解密 `%APPDATA%\AutoClaw\auth.json` 的 `enc:v10`（DPAPI → AES-256-GCM）+ 真实设备身份，一键入库 | ✅ 实测（推荐） |
+| 本机设备身份重置 | 重新生成官方 AutoClaw 的 `identity/device.json`（Ed25519+deviceId）并移走旧 `auth.json`（自动备份/可恢复），使官方客户端以**新设备**弹登录页供手动登录；用于设备级风控拉黑后换设备 | ✅ |
 | 验证码登录 | 管理 UI 填手机号 → 真实 Chrome 浏览器桥发码/登录 → 入库 | ⚠️ 见[登录限制](#账号获取与登录限制) |
 | 设备身份 | Ed25519 密钥对；`deviceId = SHA-256(公钥原始32字节)hex`，与官方算法逐位一致 | ✅ 实测 |
 | TLS 指纹 | utls：Chrome/Firefox/Safari/Edge/随机化等预置 + 自定义 JA3；utls-over-HTTP/2 | ✅ |
@@ -93,6 +94,8 @@ print(client.chat.completions.create(
 > **登录 400001 定性**（逐项对照实验）：与验证码时效、设备注册、cookie(`acw_tc`)、UA、请求体、Go 原生 TLS、utls Chrome+HTTP/2 均无关；真实 Chrome 桥干净单发仍拒。
 > 结合"官方客户端早期可登录、本机连打十余次失败后全拒、同 IP 新号也拒"，最可能为**反复失败+高频发码触发的 IP/设备级风控黑名单**。
 > 应对（不 spoof 风险 SDK）：设置 `login_proxy` 换干净出口 IP → 停止高频触发、冷却后**单次**干净尝试；或直接用官方登录+导入（最稳）。
+>
+> **设备级拉黑自救**：面板「🔄 重置本机设备身份」（自动备份、要求官方客户端已退出）→ 打开官方 AutoClaw 手动登录（以新设备绑定，官方风控正常执行）→ 回本网关「导入本机登录态」。可用「♻️ 恢复设备备份」撤销。
 
 ## API 参考
 

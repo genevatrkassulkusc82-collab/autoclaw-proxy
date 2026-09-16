@@ -8,6 +8,7 @@ package main
 //   401 → 刷新 token 重试一次；429/5xx → 账号冷却 + 换号
 
 import (
+	"sync"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -24,13 +25,15 @@ import (
 
 // LLMCaller 上游 LLM 调用器
 type LLMCaller struct {
+	comboMu    sync.Mutex
+	comboCache map[int64]string
 	db   *DB
 	pool *AccountPool
 }
 
 // NewLLMCaller 创建调用器
 func NewLLMCaller(db *DB, pool *AccountPool) *LLMCaller {
-	return &LLMCaller{db: db, pool: pool}
+	return &LLMCaller{comboCache: map[int64]string{},db: db, pool: pool}
 }
 
 var modelPrefixRe = regexp.MustCompile(`^[a-z]+_`)
@@ -175,54 +178,55 @@ func (c *LLMCaller) callWithAccount(ctx context.Context, a *Account, reqModel st
 		return nil, err
 	}
 
-	doCall := func(token string) (*http.Response, error) {
-		body := make(map[string]interface{}, len(requestBody))
-		for k, v := range requestBody {
-			body[k] = v
+	tryCombos := func(token string) (*http.Response, string, error) {
+		var lastResp *http.Response
+		var lastCombo string
+		for _, cb := range c.combosFor(a) {
+			resp, terr := c.doCombo(ctx, a, route, requestBody, token, cb)
+			if terr != nil {
+				return nil, cb, terr
+			}
+			// 405/404=路径不匹配，401=token 对该区域无效 → 均试下一组合
+			if resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnauthorized {
+				lastResp, lastCombo = resp, cb
+				continue
+			}
+			c.cacheCombo(a.ID, cb)
+			return resp, cb, nil
 		}
-		body["model"] = stripModelPrefix(route) // 上游 body model 去前缀
-		payload, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
+		if lastResp != nil {
+			return lastResp, lastCombo, nil // 全部组合均 401/404/405 → 返回最后一个交由上层处理
 		}
-		base := strings.TrimSuffix(RegionHost(c.db, a), "/") + llmProxyPath
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(payload))
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range llmHeaders(token, route, RegionLang(a)) {
-			req.Header.Set(k, v)
-		}
-		stream, _ := body["stream"].(bool)
-		timeout := 10 * time.Minute // 流式长连接；非流式也足够
-		if !stream {
-			timeout = 5 * time.Minute
-		}
-		client := ClientForProxy(c.pool.egress.ProxyURLForAccount(a), timeout)
-		return client.Do(req)
+		return nil, "", nil
 	}
 
-	resp, err := doCall(at)
+	resp, combo, err := tryCombos(at)
 	if err != nil {
 		log.Printf("[llm] account=%d transport error: %v", a.ID, err)
 		_ = c.db.BumpAccountFailure(a.ID, "transport: "+err.Error())
 		return nil, sanitizeUpstreamError(0, "")
 	}
+	if resp == nil {
+		return nil, sanitizeUpstreamError(http.StatusNotFound, "")
+	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		// 401 → 强制刷新后重放一次（复刻 AutoClawZai401Retry 语义）
 		resp.Body.Close()
 		log.Printf("[llm] account=%d 401, refreshing token", a.ID)
 		newAT, rerr := c.pool.RefreshAccount(a, true)
 		if rerr != nil {
 			return nil, &errAccountCooldown{reason: "401 且刷新失败: " + rerr.Error()}
 		}
-		resp, err = doCall(newAT)
+		resp, combo, err = tryCombos(newAT)
 		if err != nil {
 			log.Printf("[llm] account=%d transport error (after refresh): %v", a.ID, err)
 			return nil, sanitizeUpstreamError(0, "")
 		}
+		if resp == nil {
+			return nil, sanitizeUpstreamError(http.StatusNotFound, "")
+		}
 	}
+	_ = combo
 
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
@@ -235,7 +239,6 @@ func (c *LLMCaller) callWithAccount(ctx context.Context, a *Account, reqModel st
 		c.pool.MarkCooldown(a, d, fmt.Sprintf("429 限流 (retry-after=%s)", ra))
 		return nil, &errAccountCooldown{reason: "429"}
 	case resp.StatusCode == 500 && isInvalidBodyRejection(resp):
-		// 500 invalid request body：多半是风控/头问题，冷却该账号换号
 		c.pool.MarkCooldown(a, 5*time.Minute, "500 invalid request body（疑似风控）")
 		return nil, &errAccountCooldown{reason: "500 invalid request body"}
 	case resp.StatusCode >= 500:
@@ -245,7 +248,6 @@ func (c *LLMCaller) callWithAccount(ctx context.Context, a *Account, reqModel st
 		c.pool.MarkCooldown(a, 30*time.Second, fmt.Sprintf("上游 HTTP %d", resp.StatusCode))
 		return nil, &errAccountCooldown{reason: fmt.Sprintf("上游 HTTP %d", resp.StatusCode)}
 	case resp.StatusCode != http.StatusOK:
-		// 未处理的非 200（400/403/404 等）：原文只进日志，客户端收屏蔽错误
 		defer resp.Body.Close()
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		reqID := extractUpstreamReqID(raw)
@@ -256,6 +258,66 @@ func (c *LLMCaller) callWithAccount(ctx context.Context, a *Account, reqModel st
 
 	return &LLMResult{Resp: resp, Account: a, Route: route, Attempts: 1}, nil
 }
+
+// combosFor 返回该账号的 (host, chatPath) 候选组合（缓存组合优先），用于自动匹配区域/路径
+func (c *LLMCaller) combosFor(a *Account) []string {
+	rg := accountRegion(a)
+	other := RegionCN
+	if rg == RegionCN {
+		other = RegionOversea
+	}
+	hosts := []string{RegionHost(c.db, a), other.Profile().Host}
+	paths := []string{"/chat/completions", "/v1/chat/completions"}
+	var out []string
+	c.comboMu.Lock()
+	cached := c.comboCache[a.ID]
+	c.comboMu.Unlock()
+	if cached != "" {
+		out = append(out, cached)
+	}
+	for _, h := range hosts {
+		for _, p := range paths {
+			cb := strings.TrimSuffix(h, "/") + llmProxyPath + p
+			if cb != cached {
+				out = append(out, cb)
+			}
+		}
+	}
+	return out
+}
+
+func (c *LLMCaller) cacheCombo(id int64, cb string) {
+	c.comboMu.Lock()
+	c.comboCache[id] = cb
+	c.comboMu.Unlock()
+}
+
+func (c *LLMCaller) doCombo(ctx context.Context, a *Account, route string, requestBody map[string]interface{}, token, url string) (*http.Response, error) {
+	body := make(map[string]interface{}, len(requestBody))
+	for k, v := range requestBody {
+		body[k] = v
+	}
+	body["model"] = stripModelPrefix(route)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range llmHeaders(token, route, RegionLang(a)) {
+		req.Header.Set(k, v)
+	}
+	stream, _ := body["stream"].(bool)
+	timeout := 10 * time.Minute
+	if !stream {
+		timeout = 5 * time.Minute
+	}
+	client := ClientForProxy(c.pool.egress.ProxyURLForAccount(a), timeout)
+	return client.Do(req)
+}
+
 
 func parseInt(s string) (int, error) {
 	var n int

@@ -6,6 +6,7 @@ package main
 // 本模块：per-account 额度（上游会员信息 + 本地用量汇总）与用量明细/聚合接口。
 
 import (
+	"fmt"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -61,12 +62,36 @@ type UsageSummary struct {
 
 // fetchUpstreamQuota 用账号 token 调上游 subscribe-info + product-info
 func (h *AdminHandler) fetchUpstreamQuota(a *Account) (totalBalance int64, wallets []WalletBrief, isMember, hasCodePlan bool, subscribe json.RawMessage, plans []PlanBrief, upErr string) {
-	client := NewUserAPIClient(hostSetting(h.db), h.pool.egress.ProxyURLForAccount(a))
-	client.Bridge = nil // 额度查询走 Go 客户端即可（非高风险登录端点）
+	rg := accountRegion(a)
+	other := RegionCN
+	if rg == RegionCN {
+		other = RegionOversea
+	}
+	hosts := []string{RegionHost(h.db, a), other.Profile().Host}
 	hdrs := commonHeaders("Bearer " + a.AccessToken)
 
+	// 自动匹配区域 host：逐个尝试，取第一个 code==0 的响应
 	call := func(path string) ([]byte, error) {
-		return client.postRaw(path, hdrs, []byte("{}"))
+		var lastErr error
+		for _, host := range hosts {
+			client := NewUserAPIClient(host, h.pool.egress.ProxyURLForAccount(a))
+			raw, err := client.postRaw(path, hdrs, []byte("{}"))
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			var probe struct {
+				Code int `json:"code"`
+			}
+			if json.Unmarshal(raw, &probe) == nil && probe.Code == 0 {
+				return raw, nil
+			}
+			lastErr = fmt.Errorf("host=%s code!=0", host)
+		}
+		if lastErr == nil {
+			lastErr = fmt.Errorf("无可用 host")
+		}
+		return nil, lastErr
 	}
 	if raw, err := call("/agent-assetmgr/api/v1/wallet-instances"); err == nil {
 		var out struct {

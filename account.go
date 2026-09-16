@@ -240,16 +240,17 @@ type SMSLoginFlow struct {
 
 // LoginManager 在线验证码登录管理（每流程伪造新设备身份）
 type LoginManager struct {
-	mu      sync.Mutex
-	flows   map[string]*SMSLoginFlow // flowID → flow
-	db      *DB
-	pool    *AccountPool
-	browser *BrowserService // 浏览器 HTTP 桥（真实指纹），nil 则用 Go 客户端
+	mu           sync.Mutex
+	flows        map[string]*SMSLoginFlow     // flowID → 短信登录流程
+	overseaFlows map[string]*OverseaOAuthFlow // flowID → 海外 OAuth 登录流程
+	db           *DB
+	pool         *AccountPool
+	browser      *BrowserService // 浏览器 HTTP 桥（真实指纹）+ 阿里云验证码求解，nil 则不可用过海外 OAuth/验证码
 }
 
 // NewLoginManager 创建登录管理器
 func NewLoginManager(db *DB, pool *AccountPool, browser *BrowserService) *LoginManager {
-	lm := &LoginManager{flows: map[string]*SMSLoginFlow{}, db: db, pool: pool, browser: browser}
+	lm := &LoginManager{flows: map[string]*SMSLoginFlow{}, overseaFlows: map[string]*OverseaOAuthFlow{}, db: db, pool: pool, browser: browser}
 	go lm.gcLoop()
 	return lm
 }
@@ -272,6 +273,11 @@ func (lm *LoginManager) gcLoop() {
 		for id, f := range lm.flows {
 			if time.Since(f.CreatedAt) > 30*time.Minute {
 				delete(lm.flows, id)
+			}
+		}
+		for id, f := range lm.overseaFlows {
+			if time.Since(f.CreatedAt) > 30*time.Minute {
+				delete(lm.overseaFlows, id)
 			}
 		}
 		lm.mu.Unlock()

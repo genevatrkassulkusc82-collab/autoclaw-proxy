@@ -6,9 +6,9 @@ package main
 
 import (
 	"encoding/json"
-	"strconv"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -53,6 +53,8 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /admin/accounts/{id}", a(h.handleDeleteAccount))
 	mux.HandleFunc("POST /admin/login/send-code", a(h.handleSendCode))
 	mux.HandleFunc("POST /admin/login/verify", a(h.handleLoginVerify))
+	mux.HandleFunc("POST /admin/login/oversea/start", a(h.handleOverseaOAuthStart))
+	mux.HandleFunc("POST /admin/login/oversea/complete", a(h.handleOverseaOAuthComplete))
 	mux.HandleFunc("GET /admin/models", a(h.handleModels))
 	mux.HandleFunc("POST /admin/models/sync", a(h.handleModelsSync))
 	mux.HandleFunc("GET /admin/proxies", a(h.handleListProxies))

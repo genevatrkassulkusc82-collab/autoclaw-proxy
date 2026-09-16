@@ -192,9 +192,9 @@ func (lm *LoginManager) StartOverseaOAuth(vendor OAuthVendor, group string) (flo
 			SceneID: oauthStr(cc["scene_id"]),
 			PageURL: lm.overseaCaptchaPage(),
 		}
-		captchaParam, err = lm.browser.SolveCaptcha(cfg, client.ProxyURL)
+		captchaParam, err = lm.browser.SolveCaptchaHeaded(cfg, client.ProxyURL)
 		if err != nil {
-			return "", "", fmt.Errorf("阿里云验证码求解失败: %w", err)
+			return "", "", fmt.Errorf("阿里云验证码求解失败（请在弹出的浏览器窗口手动滑动完成）: %w", err)
 		}
 	}
 

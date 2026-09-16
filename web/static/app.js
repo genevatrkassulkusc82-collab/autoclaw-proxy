@@ -579,7 +579,12 @@ async function loadModels() {
     const r = await api('/admin/models');
     $('#model-tbody').innerHTML = (r.models || []).map(m => `<tr>
       <td class="mono">${esc(m.id)}</td><td>${esc(m.name || '-')}</td>
-      <td>${(m.regions || []).map(x => x === 'oversea' ? '<span class="badge badge-info">海外</span>' : '<span class="badge badge-success">国内</span>').join(' ') || '-'}</td>
+      <td>${(m.regions || []).map(rs => {
+        const label = rs.region === 'oversea' ? '海外' : '国内';
+        const cls = rs.enabled ? (rs.region === 'oversea' ? 'badge-info' : 'badge-success') : 'badge-muted';
+        const txt = rs.enabled ? label : label + '(禁)';
+        return `<span class="badge ${cls}" style="cursor:pointer" title="点击切换启用/禁用" onclick="toggleModel('${rs.region}','${m.id}',${!rs.enabled})">${txt}</span>`;
+      }).join(' ') || '-'}</td>
       <td>${m.reasoning ? '✓' : ''}</td><td>${(m.input || []).join(',')}</td>
       <td>${m.contextWindow ? fmtNum(m.contextWindow) : '-'}</td>
       <td>${m.maxTokens ? fmtNum(m.maxTokens) : '-'}</td>
@@ -791,5 +796,13 @@ async function switchRegion(id, region) {
     await api('/admin/accounts/' + id + '/region', { method: 'POST', body: { region } });
     toast('已切换为 ' + (region === 'oversea' ? '海外' : '国内'));
     loadAccounts();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function toggleModel(region, model, enabled) {
+  try {
+    await api('/admin/models/toggle', { method: 'POST', body: { region, model, enabled } });
+    toast((enabled ? '启用 ' : '禁用 ') + region + ' / ' + model);
+    loadModels();
   } catch (e) { toast(e.message, 'error'); }
 }

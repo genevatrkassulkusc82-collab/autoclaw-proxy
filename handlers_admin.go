@@ -57,6 +57,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/login/oversea/complete", a(h.handleOverseaOAuthComplete))
 	mux.HandleFunc("GET /admin/models", a(h.handleModels))
 	mux.HandleFunc("POST /admin/models/sync", a(h.handleModelsSync))
+	mux.HandleFunc("POST /admin/models/toggle", a(h.handleModelToggle))
 	mux.HandleFunc("GET /admin/proxies", a(h.handleListProxies))
 	mux.HandleFunc("POST /admin/proxies", a(h.handleSaveProxy))
 	mux.HandleFunc("DELETE /admin/proxies/{id}", a(h.handleDeleteProxy))
@@ -279,7 +280,25 @@ func (h *AdminHandler) handleModels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]interface{}{"models": h.llm.Catalog(NormalizeRegion(regionParam)), "regions": AllRegions()})
 		return
 	}
-	writeJSON(w, 200, map[string]interface{}{"models": h.llm.CatalogWithRegions(), "regions": AllRegions()})
+	writeJSON(w, 200, map[string]interface{}{"models": h.llm.CatalogWithState(), "regions": AllRegions()})
+}
+
+// handleModelToggle 启用/禁用某区域的某模型
+func (h *AdminHandler) handleModelToggle(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Region  string `json:"region"`
+		Model   string `json:"model"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Model == "" || req.Region == "" {
+		writeErr(w, 400, "缺少 region/model")
+		return
+	}
+	if err := h.db.SetModelToggle(NormalizeRegion(req.Region), req.Model, req.Enabled); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"ok": true})
 }
 
 func (h *AdminHandler) handleModelsSync(w http.ResponseWriter, r *http.Request) {

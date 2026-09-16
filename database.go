@@ -175,6 +175,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
   created_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix);
+CREATE TABLE IF NOT EXISTS model_toggles (
+  region TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (region, model_id)
+);
 `
 	_, err := d.conn.Exec(ddl)
 	if err != nil {
@@ -506,4 +512,44 @@ func (d *DB) LoadModelCatalog(region Region) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(v)
+}
+
+// ---- 模型区域开关 ----
+
+// SetModelToggle 设置某区域某模型启用/禁用
+func (d *DB) SetModelToggle(region Region, modelID string, enabled bool) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec(`INSERT INTO model_toggles(region,model_id,enabled) VALUES(?,?,?)
+		ON CONFLICT(region,model_id) DO UPDATE SET enabled=excluded.enabled`,
+		string(region), modelID, boolToInt(enabled))
+	return err
+}
+
+// IsModelDisabled 某区域某模型是否被禁用（默认启用）
+func (d *DB) IsModelDisabled(region Region, modelID string) bool {
+	var en int = 1
+	_ = d.conn.QueryRow(`SELECT enabled FROM model_toggles WHERE region=? AND model_id=?`, string(region), modelID).Scan(&en)
+	return en == 0
+}
+
+// ModelToggleState 返回 map[region]map[modelID]enabled（仅含显式设置项）
+func (d *DB) ModelToggleState() map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	rows, err := d.conn.Query(`SELECT region, model_id, enabled FROM model_toggles`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rg, mid string
+		var en int
+		if rows.Scan(&rg, &mid, &en) == nil {
+			if out[rg] == nil {
+				out[rg] = map[string]bool{}
+			}
+			out[rg][mid] = en != 0
+		}
+	}
+	return out
 }

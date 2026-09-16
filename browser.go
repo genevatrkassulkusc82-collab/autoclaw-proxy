@@ -27,8 +27,9 @@ import (
 )
 
 const (
-	captchaSolveTimeout = 40 * time.Second
-	captchaSolveRetries = 3
+	captchaSolveTimeout  = 40 * time.Second
+	captchaManualTimeout = 180 * time.Second // 有头人工滑动：留足操作时间
+	captchaSolveRetries  = 3
 	// 与本机 Chrome 稳定版一致的 UA（stealth 注入保持同值）
 	browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
@@ -210,7 +211,7 @@ func (s *BrowserService) SolveCaptcha(cc *CaptchaConfig, proxyURL string) (strin
 
 	var lastErr error
 	for attempt := 1; attempt <= captchaSolveRetries; attempt++ {
-		param, err := s.solveOnce(cc, headless, proxyURL)
+		param, err := s.solveOnce(cc, headless, proxyURL, captchaSolveTimeout)
 		if err == nil && param != "" {
 			s.mu.Lock()
 			s.manual = false
@@ -232,7 +233,33 @@ func (s *BrowserService) SolveCaptcha(cc *CaptchaConfig, proxyURL string) (strin
 	return "", fmt.Errorf("验证码求解失败（%d 次）: %v", captchaSolveRetries, lastErr)
 }
 
-func (s *BrowserService) solveOnce(cc *CaptchaConfig, headless bool, proxyURL string) (string, error) {
+// SolveCaptchaHeaded 强制有头模式：弹出可见浏览器窗口加载验证码，由用户手动滑动完成。
+// 用于海外 OAuth 等必须人工过验证码的场景（无痕验证不一定能自动过；有头窗口让用户直接操作）。
+func (s *BrowserService) SolveCaptchaHeaded(cc *CaptchaConfig, proxyURL string) (string, error) {
+	if cc == nil || !cc.Enabled || cc.SceneID == "" {
+		return "", errors.New("验证码配置未启用（scene_id/prefix/region 缺失）")
+	}
+	s.solveSem <- struct{}{}
+	defer func() { <-s.solveSem }()
+
+	var lastErr error
+	for attempt := 1; attempt <= captchaSolveRetries; attempt++ {
+		log.Printf("[browser] 弹出有头浏览器，请人工滑动完成验证 (attempt=%d, 超时 %v)", attempt, captchaManualTimeout)
+		param, err := s.solveOnce(cc, false, proxyURL, captchaManualTimeout)
+		if err == nil && param != "" {
+			s.mu.Lock()
+			s.lastUsed = time.Now()
+			s.mu.Unlock()
+			log.Printf("[browser] 人工验证成功 (attempt=%d)", attempt)
+			return param, nil
+		}
+		lastErr = err
+		log.Printf("[browser] 人工验证失败 attempt=%d: %v", attempt, err)
+	}
+	return "", fmt.Errorf("有头人工验证失败（%d 次）: %v", captchaSolveRetries, lastErr)
+}
+
+func (s *BrowserService) solveOnce(cc *CaptchaConfig, headless bool, proxyURL string, timeout time.Duration) (string, error) {
 	browser, l, err := s.launch(headless, proxyURL)
 	if err != nil {
 		return "", err
@@ -277,7 +304,7 @@ func (s *BrowserService) solveOnce(cc *CaptchaConfig, headless bool, proxyURL st
 	if err = page.SetDocumentContent(captchaHTML(cc.SceneID, cc.Region, cc.Prefix)); err != nil {
 		return "", fmt.Errorf("注入验证页失败: %w", err)
 	}
-	deadline := time.After(captchaSolveTimeout)
+	deadline := time.After(timeout)
 	for {
 		select {
 		case ev := <-events:
@@ -295,7 +322,7 @@ func (s *BrowserService) solveOnce(cc *CaptchaConfig, headless bool, proxyURL st
 				return "", fmt.Errorf("启动异常: %v", ev["message"])
 			}
 		case <-deadline:
-			return "", fmt.Errorf("求解超时（%v）", captchaSolveTimeout)
+			return "", fmt.Errorf("求解超时（%v）", timeout)
 		}
 	}
 }
@@ -341,10 +368,10 @@ func (s *BrowserService) HTTPJSON(method, url string, headers map[string]string,
 
 	if s.browser == nil {
 		proxy := ""
-	if s.ProxyFunc != nil {
-		proxy = s.ProxyFunc()
-	}
-	browser, l, err := s.launch(true, proxy) // headless；经干净出口 IP
+		if s.ProxyFunc != nil {
+			proxy = s.ProxyFunc()
+		}
+		browser, l, err := s.launch(true, proxy) // headless；经干净出口 IP
 		if err != nil {
 			return 0, "", err
 		}

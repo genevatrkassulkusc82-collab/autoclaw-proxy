@@ -386,19 +386,67 @@ func (e *ModelError) Error() string {
 
 // Catalog 指定区域的模型目录（远端缓存 + 内置兜底）
 func (c *LLMCaller) Catalog(region Region) []RemoteModel {
+	var models []RemoteModel
 	if raw := c.db.LoadModelCatalog(region); len(raw) > 0 {
-		var models []RemoteModel
-		if json.Unmarshal(raw, &models) == nil && len(models) > 0 {
-			return models
+		json.Unmarshal(raw, &models)
+	}
+	if len(models) == 0 && region == DefaultRegion {
+		models = builtinCatalog()
+	}
+	// 过滤该区域被禁用的模型
+	out := models[:0]
+	for _, m := range models {
+		if !c.db.IsModelDisabled(region, m.ID) {
+			out = append(out, m)
 		}
 	}
-	// 仅国内回退内置快照；海外无缓存时返回空（避免把国内目录冒充海外目录）
-	if region == DefaultRegion {
-		return builtinCatalog()
-	}
-	return nil
+	return out
 }
 
+// RegionState 某模型在某区域的可用/启用状态
+type RegionState struct {
+	Region  string `json:"region"`
+	Enabled bool   `json:"enabled"`
+}
+
+// ModelWithState 模型 + 各区域启用状态（含被禁用的区域，供 UI 展示/切换）
+type ModelWithState struct {
+	RemoteModel
+	Regions []RegionState `json:"regions"`
+}
+
+// CatalogWithState 全区域目录聚合（含禁用状态）
+func (c *LLMCaller) CatalogWithState() []ModelWithState {
+	state := c.db.ModelToggleState()
+	byID := map[string]*ModelWithState{}
+	var order []string
+	for _, rg := range AllRegionValues() {
+		raw := c.db.LoadModelCatalog(rg)
+		var models []RemoteModel
+		if len(raw) > 0 {
+			json.Unmarshal(raw, &models)
+		}
+		if len(models) == 0 && rg == DefaultRegion {
+			models = builtinCatalog()
+		}
+		for _, m := range models {
+			if _, ok := byID[m.ID]; !ok {
+				byID[m.ID] = &ModelWithState{RemoteModel: m}
+				order = append(order, m.ID)
+			}
+			en := true
+			if v, ok := state[string(rg)][m.ID]; ok {
+				en = v
+			}
+			byID[m.ID].Regions = append(byID[m.ID].Regions, RegionState{Region: string(rg), Enabled: en})
+		}
+	}
+	var out []ModelWithState
+	for _, id := range order {
+		out = append(out, *byID[id])
+	}
+	return out
+}
 // CatalogUnion 所有"有账号的区域"目录的并集（按 ID 去重），用于 /v1/models 默认列表。
 // 同一 ID 在多区域都存在时只列一次——调度时再按账号区域各自解析路由。
 func (c *LLMCaller) CatalogUnion() []RemoteModel {
